@@ -515,18 +515,19 @@ describe("doctor preview warnings", () => {
   });
 
   it("warns about default private group replies when channels are configured", () => {
-    expect(
-      collectVisibleReplyToolPolicyWarnings({
-        channels: {
-          slack: {},
-        },
-        tools: {
-          profile: "messaging",
-        },
-      }),
-    ).toEqual([
+    const warnings = collectVisibleReplyToolPolicyWarnings({
+      channels: {
+        slack: {},
+      },
+      tools: {
+        profile: "messaging",
+      },
+    });
+
+    expect(warnings).toEqual([
       expect.stringContaining('messages.groupChat.visibleReplies defaults to "message_tool"'),
     ]);
+    expect(warnings[0]).not.toContain("message tool is unavailable");
   });
 
   it("skips visible reply tool warnings when default groups are unused or groups are automatic", () => {
