@@ -233,6 +233,7 @@ describe("doctor empty allowlist policy warnings", () => {
       account: { allowFrom: ["user:1"] },
       capabilities: baseCapabilities({
         commandGroupAllowFromFallbackToAllowFrom: false,
+        legacyDmCommandAllowFromMigrationTarget: "commands.allowFrom",
         groupOwnerAllowFromFallbackToAllowFrom: false,
       }),
       cfg: { channels: { signal: {} } },
@@ -246,6 +247,23 @@ describe("doctor empty allowlist policy warnings", () => {
       "- channels.signal elevated authorization currently uses allowFrom as the elevated allowlist fallback because tools.elevated.allowFrom.signal is unset. This behavior will be removed in future releases; set tools.elevated.allowFrom.signal explicitly.",
     ]);
     expectFutureRemovalWarningWithoutDoctorText(warnings);
+  });
+
+  it("stays quiet for command fallback when support is only defaulted", () => {
+    const warnings = collectEmptyAllowlistPolicyWarningsForAccount({
+      account: { allowFrom: ["user:1"] },
+      capabilities: baseCapabilities({
+        commandGroupAllowFromFallbackToAllowFrom: false,
+        elevatedAllowFromFallbackToAllowFrom: false,
+        groupOwnerAllowFromFallbackToAllowFrom: false,
+      }),
+      cfg: { channels: { signal: {} } },
+      channelName: "signal",
+      doctorFixCommand: "openclaw doctor --fix",
+      prefix: "channels.signal",
+    });
+
+    expect(warnings).toStrictEqual([]);
   });
 
   it("stays quiet for command and elevated fallback when explicit empty provider targets are configured", () => {

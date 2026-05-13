@@ -177,6 +177,7 @@ function collectCommandFallbackRelianceWarnings(params: {
     params.cfg &&
     params.channelName &&
     params.capabilities.commandAllowFromFallbackToAllowFrom &&
+    params.capabilities.legacyDmCommandAllowFromMigrationTarget &&
     !hasExplicitProviderAllowFromTarget(params.cfg?.commands?.allowFrom, params.channelName, {
       includeGlobal: true,
     })
