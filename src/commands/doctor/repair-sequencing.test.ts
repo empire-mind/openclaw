@@ -9,10 +9,14 @@ const mocks = vi.hoisted(() => ({
   getInstalledPluginRecord: vi.fn(),
   isInstalledPluginEnabled: vi.fn(),
   loadInstalledPluginIndex: vi.fn(),
+  maybeRepairAllowlistPolicyAllowFrom: vi.fn(),
   maybeRepairManagedNpmOpenClawPeerLinks: vi.fn(),
+  maybeRepairOpenPolicyAllowFrom: vi.fn(),
   maybeRepairStaleManagedNpmBundledPlugins: vi.fn(),
   maybeRepairStalePluginConfig: vi.fn(),
   repairMissingConfiguredPluginInstalls: vi.fn(),
+  resolveDoctorChannelCapabilities: vi.fn(),
+  resolveDoctorChannelCapabilityMetadata: vi.fn(),
   resolveAuthProfileOrder: vi.fn(),
   resolveProfileUnusableUntilForDisplay: vi.fn(),
 }));
@@ -84,6 +88,8 @@ vi.mock("./shared/channel-doctor.js", () => ({
     extraWarningsForAccount: () => [],
     shouldSkipDefaultEmptyGroupAllowlistWarning: () => false,
   }),
+  resolveDoctorChannelCapabilities: mocks.resolveDoctorChannelCapabilities,
+  resolveDoctorChannelCapabilityMetadata: mocks.resolveDoctorChannelCapabilityMetadata,
 }));
 
 vi.mock("./shared/empty-allowlist-scan.js", () => ({
@@ -94,10 +100,7 @@ vi.mock("./shared/empty-allowlist-scan.js", () => ({
 }));
 
 vi.mock("./shared/allowlist-policy-repair.js", () => ({
-  maybeRepairAllowlistPolicyAllowFrom: async (cfg: OpenClawConfig) => ({
-    config: cfg,
-    changes: [],
-  }),
+  maybeRepairAllowlistPolicyAllowFrom: mocks.maybeRepairAllowlistPolicyAllowFrom,
 }));
 
 vi.mock("./shared/bundled-plugin-load-paths.js", () => ({
@@ -108,10 +111,7 @@ vi.mock("./shared/bundled-plugin-load-paths.js", () => ({
 }));
 
 vi.mock("./shared/open-policy-allowfrom.js", () => ({
-  maybeRepairOpenPolicyAllowFrom: (cfg: OpenClawConfig) => ({
-    config: cfg,
-    changes: [],
-  }),
+  maybeRepairOpenPolicyAllowFrom: mocks.maybeRepairOpenPolicyAllowFrom,
 }));
 
 vi.mock("./shared/stale-plugin-config.js", () => ({
@@ -188,11 +188,30 @@ describe("doctor repair sequencing", () => {
     mocks.isInstalledPluginEnabled.mockReturnValue(false);
     mocks.loadInstalledPluginIndex.mockReturnValue({ plugins: [] });
     mocks.maybeRepairManagedNpmOpenClawPeerLinks.mockResolvedValue(false);
+    mocks.maybeRepairAllowlistPolicyAllowFrom.mockImplementation(async (cfg: OpenClawConfig) => ({
+      config: cfg,
+      changes: [],
+    }));
+    mocks.maybeRepairOpenPolicyAllowFrom.mockImplementation((cfg: OpenClawConfig) => ({
+      config: cfg,
+      changes: [],
+    }));
     mocks.maybeRepairStaleManagedNpmBundledPlugins.mockReturnValue(false);
     mocks.repairMissingConfiguredPluginInstalls.mockResolvedValue({
       changes: [],
       warnings: [],
     });
+    mocks.resolveDoctorChannelCapabilities.mockReturnValue({
+      dmAllowFromMode: "topOnly",
+      groupModel: "sender",
+      supportsGroupChats: true,
+      groupAllowFromFallbackToAllowFrom: true,
+      groupOwnerAllowFromFallbackToAllowFrom: true,
+      commandAllowFromFallbackToAllowFrom: true,
+      elevatedAllowFromFallbackToAllowFrom: false,
+      warnOnEmptyGroupSenderAllowlist: true,
+    });
+    mocks.resolveDoctorChannelCapabilityMetadata.mockReturnValue(undefined);
     mocks.resolveAuthProfileOrder.mockReturnValue([]);
     mocks.resolveProfileUnusableUntilForDisplay.mockReturnValue(null);
     mocks.maybeRepairStalePluginConfig.mockImplementation((cfg: OpenClawConfig) => ({
@@ -265,6 +284,159 @@ describe("doctor repair sequencing", () => {
     ]);
     expect(result.warningNotes.join("\n")).not.toContain("\u001B");
     expect(result.warningNotes.join("\n")).not.toContain("\r");
+  });
+
+  it("does not treat doctor capability defaults as explicit elevated fallback metadata", async () => {
+    const result = await runDoctorRepairSequence({
+      state: {
+        cfg: {
+          channels: {
+            demo: {
+              allowFrom: ["user:1"],
+            },
+          },
+        } as OpenClawConfig,
+        candidate: {
+          channels: {
+            demo: {
+              allowFrom: ["user:1"],
+            },
+          },
+        } as OpenClawConfig,
+        pendingChanges: false,
+        fixHints: [],
+      },
+      doctorFixCommand: "openclaw doctor --fix",
+      env: {},
+    });
+
+    expect(mocks.resolveDoctorChannelCapabilities).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "demo",
+    );
+    expect(result.warningNotes.join("\n")).not.toContain("elevated authorization");
+    expect(result.warningNotes.join("\n")).not.toContain("tools.elevated.allowFrom.demo");
+  });
+
+  it("runs fallback transition after allowFrom policy repairs", async () => {
+    mocks.maybeRepairAllowlistPolicyAllowFrom.mockImplementationOnce(
+      async (cfg: OpenClawConfig) => ({
+        config: {
+          ...cfg,
+          channels: {
+            ...cfg.channels,
+            demo: {
+              ...cfg.channels?.demo,
+              allowFrom: ["pairing-user"],
+            },
+          },
+        },
+        changes: [
+          'channels.demo.allowFrom: restored 1 sender entry from pairing store (dmPolicy="allowlist").',
+        ],
+      }),
+    );
+    mocks.resolveDoctorChannelCapabilityMetadata.mockImplementation(
+      (_ctx: unknown, channelName: string) =>
+        channelName === "demo"
+          ? {
+              groupAllowFromFallbackToAllowFrom: false,
+              legacyDmAllowFromMigrationTarget: "groupAllowFrom",
+            }
+          : undefined,
+    );
+
+    const result = await runDoctorRepairSequence({
+      state: {
+        cfg: {
+          channels: {
+            demo: {
+              dmPolicy: "allowlist",
+            },
+          },
+        } as OpenClawConfig,
+        candidate: {
+          channels: {
+            demo: {
+              dmPolicy: "allowlist",
+            },
+          },
+        } as OpenClawConfig,
+        pendingChanges: false,
+        fixHints: [],
+      },
+      doctorFixCommand: "openclaw doctor --fix",
+      env: {},
+    });
+
+    expect(result.state.candidate.channels?.demo).toMatchObject({
+      allowFrom: ["pairing-user"],
+      groupAllowFrom: ["pairing-user"],
+    });
+    expect(result.changeNotes).toStrictEqual([
+      'channels.demo.allowFrom: restored 1 sender entry from pairing store (dmPolicy="allowlist").',
+      "Copied channels.demo.allowFrom entries to channels.demo.groupAllowFrom because group-sender fallback to allowFrom is disabled.",
+    ]);
+  });
+
+  it("does not migrate open-policy wildcards generated by doctor repair", async () => {
+    mocks.maybeRepairOpenPolicyAllowFrom.mockImplementationOnce((cfg: OpenClawConfig) => ({
+      config: {
+        ...cfg,
+        channels: {
+          ...cfg.channels,
+          demo: {
+            ...cfg.channels?.demo,
+            allowFrom: ["*"],
+          },
+        },
+      },
+      changes: ['channels.demo.allowFrom: added wildcard for dmPolicy="open".'],
+    }));
+    mocks.resolveDoctorChannelCapabilityMetadata.mockImplementation(
+      (_ctx: unknown, channelName: string) =>
+        channelName === "demo"
+          ? {
+              groupAllowFromFallbackToAllowFrom: false,
+              legacyDmAllowFromMigrationTarget: "groupAllowFrom",
+            }
+          : undefined,
+    );
+
+    const result = await runDoctorRepairSequence({
+      state: {
+        cfg: {
+          channels: {
+            demo: {
+              dmPolicy: "open",
+              groupPolicy: "allowlist",
+            },
+          },
+        } as OpenClawConfig,
+        candidate: {
+          channels: {
+            demo: {
+              dmPolicy: "open",
+              groupPolicy: "allowlist",
+            },
+          },
+        } as OpenClawConfig,
+        pendingChanges: false,
+        fixHints: [],
+      },
+      doctorFixCommand: "openclaw doctor --fix",
+      env: {},
+    });
+
+    expect(result.state.candidate.channels?.demo).toMatchObject({
+      dmPolicy: "open",
+      groupPolicy: "allowlist",
+      allowFrom: ["*"],
+    });
+    expect(result.state.candidate.channels?.demo).not.toHaveProperty("groupAllowFrom");
+    expect(result.changeNotes).toStrictEqual([
+      'channels.demo.allowFrom: added wildcard for dmPolicy="open".',
+    ]);
   });
 
   it("repairs managed npm plugin drift before missing plugin install repair", async () => {
