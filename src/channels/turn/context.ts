@@ -2,10 +2,10 @@ import { finalizeInboundContext } from "../../auto-reply/reply/inbound-context.j
 import type { FinalizedMsgContext } from "../../auto-reply/templating.js";
 import type { ContextVisibilityMode } from "../../config/types.base.js";
 import { shouldIncludeSupplementalContext } from "../../security/context-visibility.js";
+import type { InboundTurnKind } from "./kind.js";
 import type {
   AccessFacts,
   ConversationFacts,
-  InboundTurnKind,
   InboundMediaFacts,
   MessageFacts,
   ReplyPlanFacts,
