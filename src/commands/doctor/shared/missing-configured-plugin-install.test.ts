@@ -1857,9 +1857,9 @@ describe("repairMissingConfiguredPluginInstalls", () => {
       outcomes: [
         {
           pluginId: "demo",
-          status: "error",
+          status: "skipped",
           message:
-            'ClawHub release "@openclaw/plugin-demo@1.0.0" has trust warnings. Review the package and rerun with --acknowledge-clawhub-risk to continue.',
+            'Skipped demo ClawHub update: ClawHub release "@openclaw/plugin-demo@1.0.0" has trust warnings. Review the package and rerun with --acknowledge-clawhub-risk to continue. Existing installed plugin left unchanged.',
         },
       ],
     });

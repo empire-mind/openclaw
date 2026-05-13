@@ -271,12 +271,8 @@ export class NodeRegistry {
           continue;
         }
         const approvedValue = surface.permissions?.[key];
-        if (approvedValue) {
-          nextEntries.push([key, true]);
-          continue;
-        }
-        if (approvedValue !== undefined) {
-          nextEntries.push([key, false]);
+        if (typeof approvedValue === "boolean") {
+          nextEntries.push([key, approvedValue]);
         }
       }
       const nextPermissions = nextEntries.length > 0 ? Object.fromEntries(nextEntries) : undefined;

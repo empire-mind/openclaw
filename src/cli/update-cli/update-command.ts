@@ -325,7 +325,7 @@ function createGuidedPostUpdatePluginOutcome(outcome: PluginUpdateOutcome): {
   outcome: PluginUpdateOutcome;
   warning?: PostUpdatePluginWarning;
 } {
-  if (outcome.status !== "error" && !isDisabledAfterFailureOutcome(outcome)) {
+  if (outcome.status !== "error" && !isActionableSkippedPostUpdateOutcome(outcome)) {
     return { outcome };
   }
   const warning = createPostUpdatePluginWarning({
@@ -343,6 +343,20 @@ function createGuidedPostUpdatePluginOutcome(outcome: PluginUpdateOutcome): {
 
 function isDisabledAfterFailureOutcome(outcome: PluginUpdateOutcome): boolean {
   return outcome.status === "skipped" && outcome.message.includes("after plugin update failure");
+}
+
+function isClawHubRiskAcknowledgementSkippedOutcome(outcome: PluginUpdateOutcome): boolean {
+  return (
+    outcome.status === "skipped" &&
+    outcome.message.includes("ClawHub") &&
+    outcome.message.includes("--acknowledge-clawhub-risk")
+  );
+}
+
+function isActionableSkippedPostUpdateOutcome(outcome: PluginUpdateOutcome): boolean {
+  return (
+    isDisabledAfterFailureOutcome(outcome) || isClawHubRiskAcknowledgementSkippedOutcome(outcome)
+  );
 }
 
 /**
@@ -1511,7 +1525,7 @@ export async function updatePluginsAfterCoreUpdate(params: {
   }
 
   for (const outcome of pluginUpdateOutcomes) {
-    if (outcome.status !== "error") {
+    if (outcome.status !== "error" && !isActionableSkippedPostUpdateOutcome(outcome)) {
       continue;
     }
     defaultRuntime.log(theme.warn(outcome.message));

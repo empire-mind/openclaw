@@ -114,6 +114,17 @@ function shellQuotePosixArg(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+function isClawHubRiskAcknowledgementSkippedOutcome(outcome: {
+  status: string;
+  message: string;
+}): boolean {
+  return (
+    outcome.status === "skipped" &&
+    outcome.message.includes("ClawHub") &&
+    outcome.message.includes("--acknowledge-clawhub-risk")
+  );
+}
+
 function recordClawHubInstallSpec(record: PluginInstallRecord | undefined): string | undefined {
   if (!record || record.source !== "clawhub") {
     return undefined;
@@ -883,7 +894,10 @@ async function repairMissingPluginInstalls(params: {
             ? `Repaired broken installed plugin "${outcome.pluginId}".`
             : `Repaired missing configured plugin "${outcome.pluginId}".`,
         );
-      } else if (outcome.status === "error") {
+      } else if (
+        outcome.status === "error" ||
+        isClawHubRiskAcknowledgementSkippedOutcome(outcome)
+      ) {
         warnings.push(
           appendClawHubRiskAcknowledgementGuidance({
             message: outcome.message,

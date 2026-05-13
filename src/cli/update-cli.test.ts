@@ -1507,6 +1507,60 @@ describe("update-cli", () => {
     expect(pluginOutcome(jsonOutput)?.status).toBe("skipped");
   });
 
+  it("marks unacknowledged ClawHub risk skips as post-update warnings", async () => {
+    updateNpmInstalledPlugins.mockResolvedValueOnce({
+      changed: false,
+      config: baseConfig,
+      outcomes: [
+        {
+          pluginId: "demo",
+          status: "skipped",
+          message:
+            'Skipped demo ClawHub update: ClawHub release "demo@1.2.4" has trust warnings. Review the package and rerun with --acknowledge-clawhub-risk to continue. Existing installed plugin left unchanged.',
+        },
+      ],
+    });
+    vi.mocked(defaultRuntime.writeJson).mockClear();
+
+    await updateCommand({ json: true, restart: false });
+
+    const jsonOutput = lastWriteJsonCall() as UpdateRunResult | undefined;
+    expect(jsonOutput?.postUpdate?.plugins?.status).toBe("warning");
+    expect(pluginWarning(jsonOutput)?.pluginId).toBe("demo");
+    expect(pluginWarning(jsonOutput)?.reason).toContain("--acknowledge-clawhub-risk");
+    expect(pluginWarning(jsonOutput)?.guidance).toEqual([
+      "Run openclaw doctor --fix to attempt automatic repair.",
+      "Run openclaw plugins inspect demo --runtime --json for details.",
+    ]);
+    expect(pluginOutcome(jsonOutput)?.pluginId).toBe("demo");
+    expect(pluginOutcome(jsonOutput)?.status).toBe("skipped");
+  });
+
+  it("prints unacknowledged ClawHub risk skips in human post-update output", async () => {
+    updateNpmInstalledPlugins.mockResolvedValueOnce({
+      changed: false,
+      config: baseConfig,
+      outcomes: [
+        {
+          pluginId: "demo",
+          status: "skipped",
+          message:
+            'Skipped demo ClawHub update: ClawHub release "demo@1.2.4" has trust warnings. Review the package and rerun with --acknowledge-clawhub-risk to continue. Existing installed plugin left unchanged.',
+        },
+      ],
+    });
+
+    await updateCommand({ yes: true, restart: false });
+
+    const logs = vi
+      .mocked(defaultRuntime.log)
+      .mock.calls.map((call) => String(call[0]))
+      .join("\n");
+    expect(logs).toContain("--acknowledge-clawhub-risk");
+    expect(logs).toContain("Run openclaw doctor --fix to attempt automatic repair.");
+    expect(logs).toContain("Run openclaw plugins inspect demo --runtime --json for details.");
+  });
+
   it("fails unexpected post-core plugin sync exceptions", async () => {
     syncPluginsForUpdateChannel.mockRejectedValueOnce(new Error("plugin sync invariant broke"));
 
