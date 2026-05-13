@@ -58,4 +58,5 @@ export type {
   BuildChannelTurnContextParams,
   BuiltChannelTurnContext,
 } from "../channels/turn/context.js";
+export type { InboundTurnKind } from "../channels/turn/types.js";
 export { mergeInboundPathRoots } from "../media/inbound-path-policy.js";

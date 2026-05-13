@@ -506,6 +506,7 @@ export function installSessionToolResultGuard(
     redactLoggingConfig?: ToolResultDetailRedactionConfig;
     maxToolResultChars?: number;
     suppressNextUserMessagePersistence?: boolean;
+    suppressTranscriptOnlyAssistantPersistence?: boolean;
     onUserMessagePersisted?: (
       message: Extract<AgentMessage, { role: "user" }>,
     ) => void | Promise<void>;
@@ -669,6 +670,14 @@ export function installSessionToolResultGuard(
 
     const finalMessage = applyBeforeWriteHook(persistMessage(nextMessage));
     if (!finalMessage) {
+      return undefined;
+    }
+    const finalRole = (finalMessage as { role?: unknown }).role;
+    if (
+      finalRole === "assistant" &&
+      toolCalls.length === 0 &&
+      opts?.suppressTranscriptOnlyAssistantPersistence === true
+    ) {
       return undefined;
     }
     if (isUserAgentMessage(finalMessage) && suppressNextUserMessagePersistence) {

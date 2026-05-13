@@ -5,6 +5,7 @@ import { shouldIncludeSupplementalContext } from "../../security/context-visibil
 import type {
   AccessFacts,
   ConversationFacts,
+  InboundTurnKind,
   InboundMediaFacts,
   MessageFacts,
   ReplyPlanFacts,
@@ -45,6 +46,7 @@ export type BuiltChannelTurnContext = FinalizedMsgContext & {
   RawBody: string;
   SessionKey: string;
   To: string;
+  InboundTurnKind: InboundTurnKind;
 };
 
 function compactStrings(values: Array<string | undefined>): string[] | undefined {
@@ -134,6 +136,7 @@ export function buildChannelTurnContext(
 
   return finalizeInboundContext({
     Body: body,
+    InboundTurnKind: params.message.inboundTurnKind ?? "user_request",
     BodyForAgent: params.message.bodyForAgent ?? params.message.rawBody,
     InboundHistory: params.message.inboundHistory,
     RawBody: params.message.rawBody,

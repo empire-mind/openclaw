@@ -1645,6 +1645,8 @@ export async function runEmbeddedAttempt(
             : undefined,
         allowedToolNames: replayAllowedToolNames,
         suppressNextUserMessagePersistence: params.suppressNextUserMessagePersistence,
+        suppressTranscriptOnlyAssistantPersistence:
+          params.suppressTranscriptOnlyAssistantPersistence,
         onUserMessagePersisted: (message) => {
           params.onUserMessagePersisted?.(message);
         },
@@ -3145,6 +3147,13 @@ export async function runEmbeddedAttempt(
                 appendSystemContext: buildRuntimeContextSystemContext(runtimeContextForHook),
               })
             : undefined;
+          systemPromptReport.currentTurn = {
+            ...(params.currentTurnKind ? { kind: params.currentTurnKind } : {}),
+            promptChars: promptForModel.length,
+            runtimeContextChars: promptSubmission.runtimeOnly
+              ? (runtimeSystemContext?.length ?? 0)
+              : (runtimeContextForHook?.length ?? 0),
+          };
           const systemPromptForHook = runtimeSystemPromptForHook ?? systemPromptText;
 
           const persistBlockedBeforeAgentRun = async (block: {

@@ -12,6 +12,7 @@ function makeParams(
     contextTokens?: number | null;
     totalTokens?: number | null;
     totalTokensFresh?: boolean;
+    currentTurn?: NonNullable<SessionEntry["systemPromptReport"]>["currentTurn"];
   },
 ): HandleCommandsParams {
   return {
@@ -45,6 +46,7 @@ function makeParams(
           projectContextChars: 500,
           nonProjectContextChars: 500,
         },
+        ...(options?.currentTurn ? { currentTurn: options.currentTurn } : {}),
         injectedWorkspaceFiles: [
           {
             name: "AGENTS.md",
@@ -178,6 +180,28 @@ describe("buildContextReply", () => {
       expect(png.subarray(12, 16).toString("ascii")).toBe("IHDR");
       expect(png.readUInt32BE(16)).toBe(1280);
       expect(png.readUInt32BE(20)).toBe(860);
+    } finally {
+      await unlink(result.mediaUrl);
+    }
+  });
+
+  it("counts room events as event context in context maps", async () => {
+    const result = await buildContextReply(
+      makeParams("/context map", false, {
+        contextTokens: 8_192,
+        totalTokens: 900,
+        currentTurn: {
+          kind: "room_event",
+          promptChars: 11,
+          runtimeContextChars: 17,
+        },
+      }),
+    );
+    if (!result.mediaUrl) {
+      throw new Error("missing context map media path");
+    }
+    try {
+      expect(result.text).toContain("Tracked: 10,548 chars");
     } finally {
       await unlink(result.mediaUrl);
     }
