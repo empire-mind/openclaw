@@ -58,6 +58,25 @@ Do not precompute effective allowlists, command owners, or command groups. The
 resolver derives them from raw allowlists, store callbacks, route descriptors,
 access groups, policy, and conversation kind.
 
+`allowFrom` is the direct-message allowlist. For group conversations, pass
+explicit non-DM targets when the channel has them:
+
+- `groupAllowFrom` controls normal group sender authorization.
+- `command.commandGroupAllowFrom` controls group command senders.
+- `command.groupOwnerAllowFrom` controls group command owners.
+
+`groupAllowFromFallbackToAllowFrom` controls only the shared normal group
+sender fallback. `command.commandGroupAllowFromFallbackToAllowFrom` is a
+separate command-group override; when omitted, it inherits the normal group
+fallback flag. `command.groupOwnerAllowFromFallbackToAllowFrom` controls the
+legacy group command-owner fallback and defaults to enabled for compatibility.
+
+When a channel disables one of these fallbacks, declare matching doctor
+capability metadata so `openclaw doctor --fix` can copy existing DM `allowFrom`
+entries into the explicit target. Runtime config loading does not perform this
+repair. Channel-local pre-resolution fallback is still channel-owned and must be
+removed in the channel plugin before the metadata target is declared.
+
 ## Result
 
 Bundled plugins should consume modern projections directly:

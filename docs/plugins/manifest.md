@@ -740,6 +740,32 @@ checks that run before channel runtime loads. Bundled channels can also publish
 the same defaults through `package.json#openclaw.channel.commands` alongside
 their other package-owned channel catalog metadata.
 
+Channel packages can also publish `package.json#openclaw.channel.doctorCapabilities`
+for read-only doctor and transition checks. These fields are metadata, not user
+config. Set a `legacyDm...MigrationTarget` only after the channel has disabled
+the matching fallback and the target preserves the identities that were
+previously accepted through DM `allowFrom`.
+
+Valid fallback metadata fields are:
+
+| Field                                          | Values                                         |
+| ---------------------------------------------- | ---------------------------------------------- |
+| `groupAllowFromFallbackToAllowFrom`            | `boolean`                                      |
+| `legacyDmAllowFromMigrationTarget`             | `"groupAllowFrom"` or `"groupSenderAllowFrom"` |
+| `groupOwnerAllowFromFallbackToAllowFrom`       | `boolean`                                      |
+| `legacyDmGroupOwnerAllowFromMigrationTarget`   | `"groupOwnerAllowFrom"`                        |
+| `commandGroupAllowFromFallbackToAllowFrom`     | `boolean`                                      |
+| `legacyDmCommandGroupAllowFromMigrationTarget` | `"commandGroupAllowFrom"`                      |
+| `commandAllowFromFallbackToAllowFrom`          | `boolean`                                      |
+| `legacyDmCommandAllowFromMigrationTarget`      | `"commands.allowFrom"`                         |
+| `elevatedAllowFromFallbackToAllowFrom`         | `boolean`                                      |
+| `legacyDmElevatedAllowFromMigrationTarget`     | `"tools.elevated.allowFrom"`                   |
+
+Command-only migrations must target command-specific allowlists:
+`commandGroupAllowFrom`, `groupOwnerAllowFrom`, or provider maps under
+`commands.allowFrom` and `tools.elevated.allowFrom`. Do not use normal group
+sender targets to preserve command authorization fallback.
+
 ```json
 {
   "channelConfigs": {
