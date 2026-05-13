@@ -264,12 +264,15 @@ export function createExecApprovalHandlers(
         return;
       }
       const sanitizedCommandText = sanitizedCommandDisplay.text;
-      const commandAnalysis = resolveCommandAnalysisSummaryForDisplay({
+      const commandAnalysisPromise = resolveCommandAnalysisSummaryForDisplay({
         host,
         commandText: effectiveCommandText,
         commandArgv: effectiveCommandArgv,
         cwd: effectiveCwd,
         sanitizeText: sanitizeExecApprovalWarningText,
+      }).catch((err) => {
+        context.logGateway?.error?.(`exec approvals: command analysis failed: ${String(err)}`);
+        return null;
       });
       const commandSpans =
         commandHighlighting && sanitizedCommandText === effectiveCommandText
@@ -309,7 +312,7 @@ export function createExecApprovalHandlers(
         security: p.security ?? null,
         ask: p.ask ?? null,
         warningText: warningText ? sanitizeExecApprovalWarningText(warningText) : null,
-        commandAnalysis,
+        commandAnalysis: null,
         commandSpans,
         allowedDecisions: resolveExecApprovalAllowedDecisions({ ask: p.ask ?? null }),
         agentId: effectiveAgentId ?? null,
@@ -346,6 +349,9 @@ export function createExecApprovalHandlers(
         createdAtMs: record.createdAtMs,
         expiresAtMs: record.expiresAtMs,
       };
+      void commandAnalysisPromise.then((commandAnalysis) => {
+        record.request.commandAnalysis = commandAnalysis;
+      });
       await handlePendingApprovalRequest({
         manager,
         record,

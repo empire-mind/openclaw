@@ -1,4 +1,8 @@
-export { planCommandForAuthorization } from "./plan.js";
+export {
+  createExecCommandAnalysisFromAuthorizationPlan,
+  planCommandForAuthorization,
+  renderAuthorizationShellCommand,
+} from "./plan.js";
 export type {
   AnalyzableCommandAuthorizationPlan,
   CommandAuthorizationChainOperator,

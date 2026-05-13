@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { planCommandForAuthorization } from "./plan.js";
+import {
+  createExecCommandAnalysisFromAuthorizationPlan,
+  planCommandForAuthorization,
+  renderAuthorizationShellCommand,
+} from "./plan.js";
 
 describe("command authorization planner corpus", () => {
   it("marks tokenized argv commands as reusable trust candidates", async () => {
@@ -73,6 +77,72 @@ describe("command authorization planner corpus", () => {
     ]);
     expect(plan.units.every((unit) => unit.relationship === "pipeline")).toBe(true);
     expect(plan.units.every((unit) => unit.allowAlwaysEligible)).toBe(true);
+  });
+
+  it("renders enforced POSIX commands from the planner tree", async () => {
+    const plan = await planCommandForAuthorization({
+      dialect: "posix-shell",
+      command: "env printf hi | wc -c",
+    });
+    const analysis = createExecCommandAnalysisFromAuthorizationPlan({ plan });
+    expect(analysis?.ok).toBe(true);
+    if (!analysis) {
+      throw new Error("expected command analysis");
+    }
+
+    const rendered = renderAuthorizationShellCommand({
+      plan,
+      segments: analysis.segments,
+      mode: "enforced",
+    });
+
+    expect(rendered.ok).toBe(true);
+    expect(rendered.command).toMatch(/'(?:[^']*\/)?printf' 'hi' \| '(?:[^']*\/)?wc' '-c'/);
+    expect(rendered.command).not.toContain("'env'");
+  });
+
+  it("renders only safe-bin POSIX segments literally from the planner tree", async () => {
+    const plan = await planCommandForAuthorization({
+      dialect: "posix-shell",
+      command: "rg foo src/*.ts | head -n 5 && echo ok",
+    });
+    const analysis = createExecCommandAnalysisFromAuthorizationPlan({ plan });
+    expect(analysis?.ok).toBe(true);
+    if (!analysis) {
+      throw new Error("expected command analysis");
+    }
+
+    const rendered = renderAuthorizationShellCommand({
+      plan,
+      segments: analysis.segments,
+      segmentSatisfiedBy: [null, "safeBins", null],
+      mode: "safe-bins",
+    });
+
+    expect(rendered.ok).toBe(true);
+    expect(rendered.command).toContain("rg foo src/*.ts");
+    expect(rendered.command).toMatch(/'(?:[^']*\/)?head' '-n' '5'/);
+  });
+
+  it("fails closed when planner render segment metadata does not match", async () => {
+    const plan = await planCommandForAuthorization({
+      dialect: "posix-shell",
+      command: "echo ok",
+    });
+    const analysis = createExecCommandAnalysisFromAuthorizationPlan({ plan });
+    expect(analysis?.ok).toBe(true);
+    if (!analysis) {
+      throw new Error("expected command analysis");
+    }
+
+    expect(
+      renderAuthorizationShellCommand({
+        plan,
+        segments: analysis.segments,
+        segmentSatisfiedBy: [],
+        mode: "safe-bins",
+      }),
+    ).toEqual({ ok: false, reason: "segment metadata mismatch" });
   });
 
   it.each([

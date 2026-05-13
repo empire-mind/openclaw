@@ -1,6 +1,7 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { describeInterpreterInlineEval } from "../infra/command-analysis/inline-eval.js";
 import { detectPolicyInlineEval } from "../infra/command-analysis/policy.js";
+import { renderAuthorizationShellCommand } from "../infra/command-authorization/index.js";
 import {
   addDurableCommandApproval,
   type ExecAsk,
@@ -304,11 +305,18 @@ export async function processGatewayAllowlist(
   let enforcedCommand: string | undefined;
   let allowlistPlanUnavailableReason: string | null = null;
   if (hostSecurity === "allowlist" && analysisOk && allowlistSatisfied) {
-    const enforced = buildEnforcedShellCommand({
-      command: params.command,
-      segments: allowlistEval.segments,
-      platform: process.platform,
-    });
+    const enforced = allowlistEval.authorizationPlan
+      ? renderAuthorizationShellCommand({
+          plan: allowlistEval.authorizationPlan,
+          segments: allowlistEval.segments,
+          platform: process.platform,
+          mode: "enforced",
+        })
+      : buildEnforcedShellCommand({
+          command: params.command,
+          segments: allowlistEval.segments,
+          platform: process.platform,
+        });
     if (!enforced.ok || !enforced.command) {
       allowlistPlanUnavailableReason = enforced.reason ?? "unsupported platform";
     } else {

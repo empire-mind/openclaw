@@ -80,23 +80,23 @@ export function summarizeCommandSegmentsForDisplay(
   };
 }
 
-export function resolveCommandAnalysisSummaryForDisplay(params: {
+export async function resolveCommandAnalysisSummaryForDisplay(params: {
   host?: string | null;
   commandText: string;
   commandArgv?: string[];
   cwd?: string | null;
   sanitizeText?: (value: string) => string;
-}): CommandExplanationSummary | null {
+}): Promise<CommandExplanationSummary | null> {
   const analysis =
     params.host === "node"
       ? Array.isArray(params.commandArgv) && params.commandArgv.length > 0
-        ? analyzeCommandForPolicy({
+        ? await analyzeCommandForPolicy({
             source: "argv",
             argv: params.commandArgv,
             cwd: params.cwd ?? undefined,
           })
         : null
-      : analyzeCommandForPolicy({
+      : await analyzeCommandForPolicy({
           source: "shell",
           command: params.commandText,
           cwd: params.cwd ?? undefined,

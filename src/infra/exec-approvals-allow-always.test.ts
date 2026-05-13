@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveAllowAlwaysPatternEntries } from "./exec-approvals-allowlist.js";
+import {
+  resolveAllowAlwaysPatternEntries,
+  resolveAllowAlwaysPatternEntriesFromPlanAsync,
+} from "./exec-approvals-allowlist.js";
 import {
   makeMockCommandResolution,
   makeMockExecutableResolution,
@@ -44,13 +47,23 @@ describe("resolveAllowAlwaysPatterns", () => {
     });
     return {
       analysis,
-      persisted: resolveAllowAlwaysPatterns({
-        segments: analysis.segments,
-        cwd: params.dir,
-        env: params.env,
-        platform: process.platform,
-        strictInlineEval: params.strictInlineEval,
-      }),
+      persisted: (analysis.authorizationPlan
+        ? await resolveAllowAlwaysPatternEntriesFromPlanAsync({
+            plan: analysis.authorizationPlan,
+            approvedSegments: analysis.segments,
+            cwd: params.dir,
+            env: params.env,
+            platform: process.platform,
+            strictInlineEval: params.strictInlineEval,
+          })
+        : resolveAllowAlwaysPatternEntries({
+            segments: analysis.segments,
+            cwd: params.dir,
+            env: params.env,
+            platform: process.platform,
+            strictInlineEval: params.strictInlineEval,
+          })
+      ).map((pattern) => pattern.pattern),
     };
   }
 
@@ -383,54 +396,30 @@ describe("resolveAllowAlwaysPatterns", () => {
     }
     const dir = makeTempDir();
     const whoami = makeExecutable(dir, "whoami");
-    const patterns = resolveAllowAlwaysPatterns({
-      segments: [
-        {
-          raw: "/bin/zsh -c 'whoami'",
-          argv: ["/bin/zsh", "-c", "whoami"],
-          resolution: makeMockCommandResolution({
-            execution: makeMockExecutableResolution({
-              rawExecutable: "/bin/zsh",
-              resolvedPath: "/bin/zsh",
-              executableName: "zsh",
-            }),
-          }),
-        },
-      ],
-      cwd: dir,
+    const { persisted: patterns } = await resolvePersistedPatterns({
+      command: "/bin/zsh -c 'whoami'",
+      dir,
       env: makePathEnv(dir),
-      platform: process.platform,
+      safeBins: resolveSafeBins(undefined),
     });
     expect(patterns).toEqual([whoami]);
     expect(patterns).not.toContain("/bin/zsh");
   });
 
-  it("extracts all inner binaries from shell chains and deduplicates", async () => {
+  it("persists the first missed inner binary from shell chains", async () => {
     if (process.platform === "win32") {
       return;
     }
     const dir = makeTempDir();
     const whoami = makeExecutable(dir, "whoami");
-    const ls = makeExecutable(dir, "ls");
-    const patterns = resolveAllowAlwaysPatterns({
-      segments: [
-        {
-          raw: "/bin/zsh -c 'whoami && ls && whoami'",
-          argv: ["/bin/zsh", "-c", "whoami && ls && whoami"],
-          resolution: makeMockCommandResolution({
-            execution: makeMockExecutableResolution({
-              rawExecutable: "/bin/zsh",
-              resolvedPath: "/bin/zsh",
-              executableName: "zsh",
-            }),
-          }),
-        },
-      ],
-      cwd: dir,
+    makeExecutable(dir, "ls");
+    const { persisted: patterns } = await resolvePersistedPatterns({
+      command: "/bin/zsh -c 'whoami && ls && whoami'",
+      dir,
       env: makePathEnv(dir),
-      platform: process.platform,
+      safeBins: resolveSafeBins(undefined),
     });
-    expect(new Set(patterns)).toEqual(new Set([whoami, ls]));
+    expect(patterns).toEqual([whoami]);
   });
 
   it("persists shell script paths for wrapper invocations without inline commands", async () => {
@@ -660,23 +649,11 @@ $0 \\"$1\\"" touch {marker}`,
     }
     const dir = makeTempDir();
     const whoami = makeExecutable(dir, "whoami");
-    const patterns = resolveAllowAlwaysPatterns({
-      segments: [
-        {
-          raw: "/usr/local/bin/zsh -c whoami",
-          argv: ["/usr/local/bin/zsh", "-c", "whoami"],
-          resolution: makeMockCommandResolution({
-            execution: makeMockExecutableResolution({
-              rawExecutable: "/usr/local/bin/zsh",
-              resolvedPath: undefined,
-              executableName: "/usr/local/bin/zsh",
-            }),
-          }),
-        },
-      ],
-      cwd: dir,
+    const { persisted: patterns } = await resolvePersistedPatterns({
+      command: "/usr/local/bin/zsh -c whoami",
+      dir,
       env: makePathEnv(dir),
-      platform: process.platform,
+      safeBins: resolveSafeBins(undefined),
     });
     expect(patterns).toEqual([whoami]);
   });
@@ -687,23 +664,11 @@ $0 \\"$1\\"" touch {marker}`,
     }
     const dir = makeTempDir();
     const whoami = makeExecutable(dir, "whoami");
-    const patterns = resolveAllowAlwaysPatterns({
-      segments: [
-        {
-          raw: "/usr/bin/nice /bin/zsh -c whoami",
-          argv: ["/usr/bin/nice", "/bin/zsh", "-c", "whoami"],
-          resolution: makeMockCommandResolution({
-            execution: makeMockExecutableResolution({
-              rawExecutable: "/usr/bin/nice",
-              resolvedPath: "/usr/bin/nice",
-              executableName: "nice",
-            }),
-          }),
-        },
-      ],
-      cwd: dir,
+    const { persisted: patterns } = await resolvePersistedPatterns({
+      command: "/usr/bin/nice /bin/zsh -c whoami",
+      dir,
       env: makePathEnv(dir),
-      platform: process.platform,
+      safeBins: resolveSafeBins(undefined),
     });
     expect(patterns).toEqual([whoami]);
     expect(patterns).not.toContain("/usr/bin/nice");
@@ -715,23 +680,11 @@ $0 \\"$1\\"" touch {marker}`,
     }
     const dir = makeTempDir();
     const whoami = makeExecutable(dir, "whoami");
-    const patterns = resolveAllowAlwaysPatterns({
-      segments: [
-        {
-          raw: "/usr/bin/time -p /bin/zsh -c whoami",
-          argv: ["/usr/bin/time", "-p", "/bin/zsh", "-c", "whoami"],
-          resolution: makeMockCommandResolution({
-            execution: makeMockExecutableResolution({
-              rawExecutable: "/usr/bin/time",
-              resolvedPath: "/usr/bin/time",
-              executableName: "time",
-            }),
-          }),
-        },
-      ],
-      cwd: dir,
+    const { persisted: patterns } = await resolvePersistedPatterns({
+      command: "/usr/bin/time -p /bin/zsh -c whoami",
+      dir,
       env: makePathEnv(dir),
-      platform: process.platform,
+      safeBins: resolveSafeBins(undefined),
     });
     expect(patterns).toEqual([whoami]);
     expect(patterns).not.toContain("/usr/bin/time");
@@ -746,23 +699,11 @@ $0 \\"$1\\"" touch {marker}`,
     makeExecutable(dir, "toybox");
     const whoami = makeExecutable(dir, "whoami");
     const env = { PATH: `${dir}${path.delimiter}${process.env.PATH ?? ""}` };
-    const patterns = resolveAllowAlwaysPatterns({
-      segments: [
-        {
-          raw: `${busybox} sh -c whoami`,
-          argv: [busybox, "sh", "-c", "whoami"],
-          resolution: makeMockCommandResolution({
-            execution: makeMockExecutableResolution({
-              rawExecutable: busybox,
-              resolvedPath: busybox,
-              executableName: "busybox",
-            }),
-          }),
-        },
-      ],
-      cwd: dir,
+    const { persisted: patterns } = await resolvePersistedPatterns({
+      command: `${busybox} sh -c whoami`,
+      dir,
       env,
-      platform: process.platform,
+      safeBins: resolveSafeBins(undefined),
     });
     expect(patterns).toEqual([whoami]);
     expect(patterns).not.toContain(busybox);

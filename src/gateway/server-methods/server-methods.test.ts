@@ -1095,6 +1095,13 @@ describe("exec approval handlers", () => {
 
     const requested = broadcasts.find((entry) => entry.event === "exec.approval.requested");
     const request = requested?.payload as { id?: string; request?: { commandAnalysis?: unknown } };
+    await vi.waitFor(() => {
+      expect(request.request?.commandAnalysis).toMatchObject({
+        commandCount: 1,
+        riskKinds: ["inline-eval"],
+        warningLines: ["Contains inline-eval: python3 -c"],
+      });
+    });
     const commandAnalysis = request.request?.commandAnalysis as Record<string, unknown>;
     expect(commandAnalysis.commandCount).toBe(1);
     expect(commandAnalysis.riskKinds).toEqual(["inline-eval"]);

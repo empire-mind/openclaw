@@ -1,6 +1,5 @@
 import {
   analyzeArgvCommand,
-  buildSafeBinsShellCommand,
   evaluateExecAllowlist,
   evaluateShellAllowlist,
   resolvePlannedSegmentArgv,
@@ -11,6 +10,10 @@ import {
   type ExecSecurity,
   type SkillBinTrustEntry,
 } from "../infra/exec-approvals.js";
+import {
+  renderAuthorizationShellCommand,
+  type CommandAuthorizationPlan,
+} from "../infra/command-authorization/index.js";
 import { resolveExecSafeBinRuntimePolicy } from "../infra/exec-safe-bin-runtime-policy.js";
 import {
   normalizeExecutableToken,
@@ -32,6 +35,7 @@ type SystemRunAllowlistAnalysis = {
   segments: ExecCommandSegment[];
   segmentAllowlistEntries: Array<ExecAllowlistEntry | null>;
   segmentSatisfiedBy: ExecSegmentSatisfiedBy[];
+  authorizationPlan?: CommandAuthorizationPlan;
 };
 
 export async function evaluateSystemRunAllowlist(params: {
@@ -70,6 +74,7 @@ export async function evaluateSystemRunAllowlist(params: {
       segments: allowlistEval.segments,
       segmentAllowlistEntries: allowlistEval.segmentAllowlistEntries,
       segmentSatisfiedBy: allowlistEval.segmentSatisfiedBy,
+      authorizationPlan: allowlistEval.authorizationPlan,
     };
   }
 
@@ -132,6 +137,7 @@ export function resolveSystemRunExecArgv(params: {
   shellCommand: string | null;
   segments: ExecCommandSegment[];
   segmentSatisfiedBy: ExecSegmentSatisfiedBy[];
+  authorizationPlan?: CommandAuthorizationPlan;
   cwd: string | undefined;
   env: Record<string, string> | undefined;
 }): string[] | null {
@@ -158,13 +164,15 @@ export function resolveSystemRunExecArgv(params: {
     params.segmentSatisfiedBy.some((entry) => entry === "safeBins" || entry === "inlineChain") &&
     isPosixShellInlineCommandTransport(params.argv)
   ) {
-    const rebuilt = buildSafeBinsShellCommand({
-      command: params.shellCommand,
+    if (!params.authorizationPlan) {
+      return null;
+    }
+    const rebuilt = renderAuthorizationShellCommand({
+      plan: params.authorizationPlan,
       segments: params.segments,
       segmentSatisfiedBy: params.segmentSatisfiedBy,
-      cwd: params.cwd,
-      env: params.env,
       platform: process.platform,
+      mode: "safe-bins",
     });
     if (!rebuilt.ok || !rebuilt.command) {
       return null;

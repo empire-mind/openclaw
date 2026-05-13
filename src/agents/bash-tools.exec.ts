@@ -3,7 +3,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { buildCommandPayloadCandidates } from "../infra/command-analysis/risks.js";
-import { analyzeShellCommand } from "../infra/exec-approvals-analysis.js";
+import {
+  createExecCommandAnalysisFromAuthorizationPlan,
+  planCommandForAuthorization,
+} from "../infra/command-authorization/index.js";
 import {
   type ExecAsk,
   type ExecHost,
@@ -1185,10 +1188,11 @@ function parseOpenClawChannelsLoginShellCommand(raw: string): boolean {
   );
 }
 
-function rejectUnsafeControlShellCommand(command: string): void {
+async function rejectUnsafeControlShellCommand(command: string): Promise<void> {
   const rawCommand = command.trim();
-  const analysis = analyzeShellCommand({ command: rawCommand });
-  const candidates = analysis.ok
+  const plan = await planCommandForAuthorization({ dialect: "posix-shell", command: rawCommand });
+  const analysis = createExecCommandAnalysisFromAuthorizationPlan({ plan });
+  const candidates = analysis?.ok
     ? analysis.segments.flatMap((segment) => buildCommandPayloadCandidates(segment.argv))
     : rawCommand
         .split(/\r?\n/)
@@ -1447,7 +1451,7 @@ export function createExecTool(
         const rawWorkdir = explicitWorkdir ?? defaultWorkdir ?? process.cwd();
         workdir = resolveWorkdir(rawWorkdir, warnings);
       }
-      rejectUnsafeControlShellCommand(params.command);
+      await rejectUnsafeControlShellCommand(params.command);
 
       const inheritedBaseEnv = coerceEnv(process.env);
       const hostEnvResult =

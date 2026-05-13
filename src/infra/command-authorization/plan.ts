@@ -1,7 +1,15 @@
 import { detectInlineEvalArgv } from "../command-analysis/risks.js";
-import { explainShellCommand } from "../command-explainer/index.js";
-import type { CommandExplanation, CommandRisk, CommandStep } from "../command-explainer/index.js";
-import { analyzeArgvCommand, type ExecCommandSegment } from "../exec-approvals-analysis.js";
+import { explainShellCommand } from "../command-explainer/extract.js";
+import type { CommandExplanation, CommandRisk, CommandStep } from "../command-explainer/types.js";
+import {
+  analyzeArgvCommand,
+  isWindowsPlatform,
+  resolveCommandResolutionFromArgv,
+  resolvePlannedSegmentArgv,
+  windowsEscapeArg,
+  type ExecCommandAnalysis,
+  type ExecCommandSegment,
+} from "../exec-approvals-analysis.js";
 import {
   extractBindableShellWrapperInlineCommand,
   normalizeExecutableToken,
@@ -18,6 +26,16 @@ import type {
   CommandPromptOnlyReason,
   CommandUnanalyzableReason,
 } from "./types.js";
+
+type RenderAuthorizationShellCommandMode = "enforced" | "safe-bins";
+
+type SegmentSatisfiedBy =
+  | "allowlist"
+  | "safeBins"
+  | "inlineChain"
+  | "skills"
+  | "skillPrelude"
+  | null;
 
 type PlannedTree = {
   tree: CommandAuthorizationTree;
@@ -41,6 +59,70 @@ export async function planCommandForAuthorization(
     return planUnsupportedShellDialect(input.command, input.dialect);
   }
   return planPosixShellCommand(input.command, context);
+}
+
+export function createExecCommandAnalysisFromAuthorizationPlan(params: {
+  plan: CommandAuthorizationPlan;
+  tree?: CommandAuthorizationTree;
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+}): ExecCommandAnalysis | null {
+  if (params.plan.kind === "unanalyzable") {
+    return null;
+  }
+  const unitsById = new Map(params.plan.units.map((unit) => [unit.id, unit]));
+  const units = collectAuthorizationTreeUnits(params.tree ?? params.plan.tree, unitsById);
+  if (units.length === 0) {
+    return null;
+  }
+  return {
+    ok: true,
+    segments: units.map(
+      (unit): ExecCommandSegment => ({
+        raw: unit.raw,
+        argv: unit.argv,
+        resolution: resolveCommandResolutionFromArgv(unit.argv, params.cwd, params.env),
+      }),
+    ),
+  };
+}
+
+export function renderAuthorizationShellCommand(params: {
+  plan: CommandAuthorizationPlan;
+  segments: readonly ExecCommandSegment[];
+  segmentSatisfiedBy?: readonly SegmentSatisfiedBy[];
+  platform?: string | null;
+  mode: RenderAuthorizationShellCommandMode;
+}): { ok: boolean; command?: string; reason?: string } {
+  if (params.plan.kind === "unanalyzable") {
+    return { ok: false, reason: "unanalyzable command" };
+  }
+  if (
+    params.mode === "safe-bins" &&
+    params.segmentSatisfiedBy !== undefined &&
+    params.segmentSatisfiedBy.length !== params.segments.length
+  ) {
+    return { ok: false, reason: "segment metadata mismatch" };
+  }
+
+  const unitsById = new Map(params.plan.units.map((unit) => [unit.id, unit]));
+  const cursor = { index: 0 };
+  const rendered = renderAuthorizationTree({
+    tree: params.plan.tree,
+    unitsById,
+    segments: params.segments,
+    segmentSatisfiedBy: params.segmentSatisfiedBy,
+    platform: params.platform,
+    mode: params.mode,
+    cursor,
+  });
+  if (!rendered.ok) {
+    return rendered;
+  }
+  if (cursor.index !== params.segments.length) {
+    return { ok: false, reason: "segment count mismatch" };
+  }
+  return { ok: true, command: rendered.command };
 }
 
 function planArgvCommand(
@@ -315,6 +397,119 @@ function buildTreeFromSegments(
   };
 }
 
+function collectAuthorizationTreeUnits(
+  tree: CommandAuthorizationTree,
+  unitsById: ReadonlyMap<string, CommandAuthorizationUnit>,
+): CommandAuthorizationUnit[] {
+  if (tree.kind === "unit") {
+    const unit = unitsById.get(tree.unitId);
+    return unit ? [unit] : [];
+  }
+  return tree.children.flatMap((child) => collectAuthorizationTreeUnits(child, unitsById));
+}
+
+type RenderedAuthorizationTree = { ok: true; command: string } | { ok: false; reason: string };
+
+function renderAuthorizationTree(params: {
+  tree: CommandAuthorizationTree;
+  unitsById: ReadonlyMap<string, CommandAuthorizationUnit>;
+  segments: readonly ExecCommandSegment[];
+  segmentSatisfiedBy?: readonly SegmentSatisfiedBy[];
+  platform?: string | null;
+  mode: RenderAuthorizationShellCommandMode;
+  cursor: { index: number };
+}): RenderedAuthorizationTree {
+  if (params.tree.kind === "unit") {
+    return renderAuthorizationUnit({
+      unitId: params.tree.unitId,
+      unitsById: params.unitsById,
+      segments: params.segments,
+      segmentSatisfiedBy: params.segmentSatisfiedBy,
+      platform: params.platform,
+      mode: params.mode,
+      cursor: params.cursor,
+    });
+  }
+  const renderedChildren: string[] = [];
+  for (const child of params.tree.children) {
+    const rendered = renderAuthorizationTree({ ...params, tree: child });
+    if (!rendered.ok) {
+      return rendered;
+    }
+    renderedChildren.push(rendered.command);
+  }
+  if (params.tree.kind === "pipeline") {
+    return { ok: true, command: renderedChildren.join(" | ") };
+  }
+
+  const parts: string[] = [];
+  for (const [index, child] of renderedChildren.entries()) {
+    parts.push(child);
+    const operator = params.tree.operators[index];
+    if (operator) {
+      parts.push(operator);
+    }
+  }
+  return { ok: true, command: parts.join(" ") };
+}
+
+function renderAuthorizationUnit(params: {
+  unitId: string;
+  unitsById: ReadonlyMap<string, CommandAuthorizationUnit>;
+  segments: readonly ExecCommandSegment[];
+  segmentSatisfiedBy?: readonly SegmentSatisfiedBy[];
+  platform?: string | null;
+  mode: RenderAuthorizationShellCommandMode;
+  cursor: { index: number };
+}): RenderedAuthorizationTree {
+  const unit = params.unitsById.get(params.unitId);
+  if (!unit) {
+    return { ok: false, reason: "unit mapping failed" };
+  }
+  const segment = params.segments[params.cursor.index];
+  const satisfiedBy = params.segmentSatisfiedBy?.[params.cursor.index];
+  params.cursor.index += 1;
+  if (!segment) {
+    return { ok: false, reason: "segment mapping failed" };
+  }
+  if (params.mode === "safe-bins" && satisfiedBy !== "safeBins") {
+    if (satisfiedBy === "inlineChain") {
+      return { ok: false, reason: "inline chain planner render unavailable" };
+    }
+    return { ok: true, command: unit.raw.trim() };
+  }
+
+  const argv = resolvePlannedSegmentArgv(segment);
+  if (!argv) {
+    return { ok: false, reason: "segment execution plan unavailable" };
+  }
+  const rendered = renderQuotedArgv(argv, params.platform);
+  if (!rendered) {
+    return { ok: false, reason: "unsafe windows token in argv" };
+  }
+  return { ok: true, command: rendered };
+}
+
+function shellEscapeSingleArg(value: string): string {
+  const singleQuoteEscape = `'"'"'`;
+  return `'${value.replace(/'/g, singleQuoteEscape)}'`;
+}
+
+function renderQuotedArgv(argv: readonly string[], platform?: string | null): string | null {
+  if (isWindowsPlatform(platform)) {
+    const parts: string[] = [];
+    for (const token of argv) {
+      const result = windowsEscapeArg(token);
+      if (!result.ok) {
+        return null;
+      }
+      parts.push(result.escaped);
+    }
+    return parts.join(" ");
+  }
+  return argv.map((token) => shellEscapeSingleArg(token)).join(" ");
+}
+
 function createUnitFromSegment(
   segment: ExecCommandSegment,
   id: string,
@@ -480,7 +675,11 @@ function promptOnlyReasonsFromRisks(risks: readonly CommandRisk[]): CommandPromp
       reasonSet.add("command-substitution");
     } else if (risk.kind === "dynamic-executable") {
       reasonSet.add("dynamic-executable");
-    } else if (risk.kind === "line-continuation" || risk.kind === "syntax-error") {
+    } else if (
+      risk.kind === "line-continuation" ||
+      risk.kind === "process-substitution" ||
+      risk.kind === "syntax-error"
+    ) {
       reasonSet.add("unsupported-shell-syntax");
     }
   }

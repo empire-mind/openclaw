@@ -12,7 +12,7 @@ import type { CommandExplanationSummary } from "./command-analysis/explain.js";
 import { planCommandForAuthorization } from "./command-authorization/index.js";
 import {
   resolveAllowAlwaysPatternEntries,
-  resolveAllowAlwaysPatternEntriesFromPlan,
+  resolveAllowAlwaysPatternEntriesFromPlanAsync,
 } from "./exec-approvals-allowlist.js";
 import type { ExecCommandSegment } from "./exec-approvals-analysis.js";
 import type { ExecAllowlistEntry } from "./exec-approvals.types.js";
@@ -1212,7 +1212,7 @@ export async function persistAllowAlwaysPatterns(params: {
   const usePlanner =
     params.analysisOk !== false && Boolean(commandText) && params.platform !== "win32";
   const patterns = usePlanner
-    ? resolveAllowAlwaysPatternEntriesFromPlan({
+    ? await resolveAllowAlwaysPatternEntriesFromPlanAsync({
         plan: await planCommandForAuthorization(
           { dialect: "posix-shell", command: commandText ?? "" },
           {
