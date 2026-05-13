@@ -151,6 +151,39 @@ describe("runPostCorePluginConvergence", () => {
     ]);
   });
 
+  it("surfaces repair notices without marking convergence errored", async () => {
+    mocks.repairMissingConfiguredPluginInstalls.mockResolvedValue({
+      changes: ['Installed missing configured plugin "discord".'],
+      notices: [
+        'ClawHub trust warning for "@openclaw/discord@1.2.3": scan=pending; reasons=pending.',
+      ],
+      warnings: [],
+      records: { discord: { source: "clawhub", installPath: "/p/discord" } },
+    });
+    const result = await runPostCorePluginConvergence({
+      cfg: {
+        plugins: { entries: { discord: { enabled: true } } },
+      } as unknown as OpenClawConfig,
+      env: {},
+    });
+    expect(result.errored).toBe(false);
+    expect(result.warnings).toStrictEqual([]);
+    expect(result.notices).toStrictEqual([
+      {
+        reason:
+          'ClawHub trust warning for "@openclaw/discord@1.2.3": scan=pending; reasons=pending.',
+        message:
+          'ClawHub trust warning for "@openclaw/discord@1.2.3": scan=pending; reasons=pending.',
+        guidance: [],
+      },
+    ]);
+    expect(convergenceWarningsToOutcomes(result)).toStrictEqual({
+      warnings: result.notices,
+      outcomes: [],
+      errored: false,
+    });
+  });
+
   it("flags errored=true when smoke check finds a missing main entry", async () => {
     mocks.repairMissingConfiguredPluginInstalls.mockResolvedValue({
       changes: [],

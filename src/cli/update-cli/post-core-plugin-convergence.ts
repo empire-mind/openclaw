@@ -22,6 +22,7 @@ export type PostCoreConvergenceWarning = {
 
 export type PostCoreConvergenceResult = {
   changes: string[];
+  notices?: PostCoreConvergenceWarning[];
   warnings: PostCoreConvergenceWarning[];
   errored: boolean;
   smokeFailures: PluginPayloadSmokeFailure[];
@@ -81,6 +82,11 @@ export async function runPostCorePluginConvergence(params: {
     message,
     guidance: [REPAIR_GUIDANCE],
   }));
+  const notices: PostCoreConvergenceWarning[] = (repair.notices ?? []).map((message) => ({
+    reason: message,
+    message,
+    guidance: [],
+  }));
 
   const records: Record<string, PluginInstallRecord> = repair.records;
   // Filter the smoke-check input to active records ONLY: configured /
@@ -103,6 +109,7 @@ export async function runPostCorePluginConvergence(params: {
 
   return {
     changes: repair.changes,
+    notices,
     warnings,
     errored: warnings.length > 0,
     smokeFailures: smoke.failures,
@@ -174,7 +181,7 @@ export function convergenceWarningsToOutcomes(convergence: PostCoreConvergenceRe
     .filter((w): w is PostCoreConvergenceWarning & { pluginId: string } => Boolean(w.pluginId))
     .map((w) => ({ pluginId: w.pluginId, status: "error" as const, message: w.message }));
   return {
-    warnings: convergence.warnings,
+    warnings: [...convergence.warnings, ...(convergence.notices ?? [])],
     outcomes,
     errored: convergence.errored,
   };
