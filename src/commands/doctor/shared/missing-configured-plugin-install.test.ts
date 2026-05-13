@@ -274,7 +274,7 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     );
   });
 
-  it("sanitizes ClawHub acknowledgement guidance specs before rendering commands", async () => {
+  it("sanitizes and shell-quotes ClawHub acknowledgement guidance specs before rendering commands", async () => {
     mocks.installPluginFromClawHub.mockResolvedValueOnce({
       ok: false,
       code: "clawhub_risk_acknowledgement_required",
@@ -287,7 +287,7 @@ describe("repairMissingConfiguredPluginInstalls", () => {
         pluginId: "matrix",
         meta: { label: "Matrix" },
         install: {
-          clawhubSpec: "clawhub:@openclaw/plugin-matrix\n\u001b[31m@stable",
+          clawhubSpec: "clawhub:@openclaw/plugin-matrix\n\u001b[31m@stable;$(touch /tmp/pwned)",
         },
       },
     ]);
@@ -305,7 +305,10 @@ describe("repairMissingConfiguredPluginInstalls", () => {
 
     const warning = result.warnings[0] ?? "";
     expect(warning).toContain(
-      "openclaw plugins install clawhub:@openclaw/plugin-matrix\\n@stable --acknowledge-clawhub-risk",
+      "openclaw plugins install 'clawhub:@openclaw/plugin-matrix\\n@stable;$(touch /tmp/pwned)' --acknowledge-clawhub-risk",
+    );
+    expect(warning).not.toContain(
+      "openclaw plugins install clawhub:@openclaw/plugin-matrix\\n@stable;$(touch /tmp/pwned) --acknowledge-clawhub-risk",
     );
     expect(warning).not.toContain("\u001b");
     expect(warning).not.toContain("plugin-matrix\n");

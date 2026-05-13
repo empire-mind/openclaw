@@ -103,7 +103,15 @@ function appendClawHubRiskAcknowledgementGuidance(params: {
     return params.message;
   }
   const sanitizedSpec = sanitizeTerminalText(params.spec);
-  return `${params.message} To review and acknowledge this ClawHub package, run \`openclaw plugins install ${sanitizedSpec} --acknowledge-clawhub-risk\` from a trusted shell, then rerun repair.`;
+  const shellSpec = shellQuotePosixArg(sanitizedSpec);
+  return `${params.message} To review and acknowledge this ClawHub package, run \`openclaw plugins install ${shellSpec} --acknowledge-clawhub-risk\` from a trusted shell, then rerun repair.`;
+}
+
+function shellQuotePosixArg(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/u.test(value)) {
+    return value;
+  }
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function recordClawHubInstallSpec(record: PluginInstallRecord | undefined): string | undefined {
