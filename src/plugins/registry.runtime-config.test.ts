@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ConfigFileSnapshot } from "../config/types.openclaw.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { createPluginRuntimeMock } from "../plugin-sdk/test-helpers/plugin-runtime-mock.js";
 import { createPluginRecord } from "./loader-records.js";
 import { createPluginRegistry } from "./registry.js";
 import { getPluginRuntimeGatewayRequestScope } from "./runtime/gateway-request-scope.js";
@@ -19,47 +21,82 @@ function createTestRegistry(runtime: PluginRuntime) {
 }
 
 describe("plugin registry runtime config scope", () => {
-  it("runs deprecated config helpers with the owning plugin scope", async () => {
-    let loadScope = getPluginRuntimeGatewayRequestScope();
-    let writeScope = getPluginRuntimeGatewayRequestScope();
-    const config = {} as OpenClawConfig;
+  it("runs config mutations with the owning plugin scope", async () => {
+    let mutateScope = getPluginRuntimeGatewayRequestScope();
+    let replaceScope = getPluginRuntimeGatewayRequestScope();
+    const config: OpenClawConfig = {};
+    const snapshot: ConfigFileSnapshot = {
+      path: "/tmp/openclaw/config.json",
+      exists: true,
+      raw: "{}",
+      parsed: {},
+      sourceConfig: config,
+      resolved: config,
+      valid: true,
+      runtimeConfig: config,
+      config,
+      issues: [],
+      warnings: [],
+      legacyIssues: [],
+    };
     const replaceResult = {
+      path: snapshot.path,
       previousHash: null,
-      nextHash: "next",
-    } as unknown as Awaited<ReturnType<PluginRuntime["config"]["replaceConfigFile"]>>;
+      snapshot,
+      nextConfig: config,
+      afterWrite: { mode: "auto" },
+      followUp: { mode: "auto", requiresRestart: false },
+    } satisfies Awaited<ReturnType<PluginRuntime["config"]["replaceConfigFile"]>>;
+    const mutateConfigFile: PluginRuntime["config"]["mutateConfigFile"] = async (params) => {
+      mutateScope = getPluginRuntimeGatewayRequestScope();
+      await params.mutate(config, {
+        snapshot,
+        previousHash: replaceResult.previousHash,
+      });
+      return {
+        ...replaceResult,
+        afterWrite: params.afterWrite,
+        result: undefined,
+      };
+    };
+    const replaceConfigFile: PluginRuntime["config"]["replaceConfigFile"] = async (params) => {
+      replaceScope = getPluginRuntimeGatewayRequestScope();
+      return {
+        ...replaceResult,
+        nextConfig: params.nextConfig,
+        afterWrite: params.afterWrite,
+      };
+    };
     const configRuntime = {
       current: vi.fn(() => config),
-      mutateConfigFile: async <T = void>() => ({
-        ...replaceResult,
-        result: undefined as T | undefined,
-      }),
-      replaceConfigFile: async () => replaceResult,
-      loadConfig: vi.fn(() => {
-        loadScope = getPluginRuntimeGatewayRequestScope();
-        return config;
-      }),
-      writeConfigFile: vi.fn(async () => {
-        writeScope = getPluginRuntimeGatewayRequestScope();
-      }),
-    } satisfies PluginRuntime["config"];
-    const pluginRegistry = createTestRegistry({ config: configRuntime } as PluginRuntime);
+      mutateConfigFile,
+      replaceConfigFile,
+    };
+    const pluginRegistry = createTestRegistry(createPluginRuntimeMock({ config: configRuntime }));
     const record = createPluginRecord({
       id: "legacy-plugin",
       name: "Legacy Plugin",
       source: "/plugins/legacy-plugin/index.js",
       origin: "global",
       enabled: true,
+      configSchema: false,
     });
     const api = pluginRegistry.createApi(record, { config });
 
-    expect(api.runtime.config.loadConfig()).toBe(config);
-    await api.runtime.config.writeConfigFile(config);
+    await api.runtime.config.mutateConfigFile({
+      afterWrite: { mode: "none", reason: "test" },
+      mutate: () => "mutated",
+    });
+    await api.runtime.config.replaceConfigFile({
+      nextConfig: config,
+      afterWrite: { mode: "restart", reason: "test" },
+    });
 
-    expect(loadScope).toMatchObject({
+    expect(mutateScope).toMatchObject({
       pluginId: "legacy-plugin",
       pluginSource: "/plugins/legacy-plugin/index.js",
     });
-    expect(writeScope).toMatchObject({
+    expect(replaceScope).toMatchObject({
       pluginId: "legacy-plugin",
       pluginSource: "/plugins/legacy-plugin/index.js",
     });
