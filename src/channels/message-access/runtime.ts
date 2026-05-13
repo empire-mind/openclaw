@@ -564,7 +564,19 @@ function commandOwnerAllowFrom(params: {
   if (!params.isGroup) {
     return params.effectiveAllowFrom;
   }
-  return params.command?.groupOwnerAllowFrom === "none" ? [] : params.configuredAllowFrom;
+  const groupOwnerAllowFrom = params.command?.groupOwnerAllowFrom;
+  if (Array.isArray(groupOwnerAllowFrom)) {
+    return groupOwnerAllowFrom;
+  }
+  if (groupOwnerAllowFrom === "none") {
+    return [];
+  }
+  if (groupOwnerAllowFrom === "configured") {
+    return params.configuredAllowFrom;
+  }
+  return params.command?.groupOwnerAllowFromFallbackToAllowFrom === false
+    ? []
+    : params.configuredAllowFrom;
 }
 
 function commandGroupAllowFrom(params: {
@@ -623,6 +635,8 @@ export async function resolveChannelMessageIngress(
     rawGroupAllowFrom,
     rawStoreAllowFrom,
     params.command?.commandOwnerAllowFrom ?? [],
+    Array.isArray(params.command?.groupOwnerAllowFrom) ? params.command.groupOwnerAllowFrom : [],
+    params.command?.commandGroupAllowFrom ?? [],
     ...routeFacts.map((route) => route.senderAllowFrom ?? []),
   ]);
   const runtimeAccessGroupMembership = await resolveRuntimeAccessGroupMembershipFacts({
@@ -648,14 +662,17 @@ export async function resolveChannelMessageIngress(
     dmPolicy: params.policy.dmPolicy,
     groupAllowFromFallbackToAllowFrom: params.policy.groupAllowFromFallbackToAllowFrom,
   });
-  const rawCommandGroup = resolveChannelIngressEffectiveAllowFromLists({
-    allowFrom: rawAllowFrom,
-    groupAllowFrom: rawGroupAllowFrom,
-    dmPolicy: params.policy.dmPolicy,
-    groupAllowFromFallbackToAllowFrom:
-      params.command?.commandGroupAllowFromFallbackToAllowFrom ??
-      params.policy.groupAllowFromFallbackToAllowFrom,
-  });
+  const rawCommandGroupAllowFrom =
+    params.command?.commandGroupAllowFrom != null
+      ? normalizeStringEntries(params.command.commandGroupAllowFrom)
+      : resolveChannelIngressEffectiveAllowFromLists({
+          allowFrom: rawAllowFrom,
+          groupAllowFrom: rawGroupAllowFrom,
+          dmPolicy: params.policy.dmPolicy,
+          groupAllowFromFallbackToAllowFrom:
+            params.command?.commandGroupAllowFromFallbackToAllowFrom ??
+            params.policy.groupAllowFromFallbackToAllowFrom,
+        }).effectiveGroupAllowFrom;
   const isGroup = params.conversation.kind !== "direct";
   const policy: ChannelIngressPolicyInput = {
     ...params.policy,
@@ -685,7 +702,7 @@ export async function resolveChannelMessageIngress(
       commandGroup: commandGroupAllowFrom({
         command: params.command,
         isGroup,
-        effectiveCommandGroupAllowFrom: rawCommandGroup.effectiveGroupAllowFrom,
+        effectiveCommandGroupAllowFrom: rawCommandGroupAllowFrom,
       }),
     },
   });

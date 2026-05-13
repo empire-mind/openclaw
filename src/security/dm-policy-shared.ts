@@ -251,6 +251,8 @@ export function resolveDmGroupAccessWithCommandGate(
       useAccessGroups: boolean;
       allowTextCommands: boolean;
       hasControlCommand: boolean;
+      commandGroupAllowFrom?: Array<string | number> | null;
+      commandGroupAllowFromFallbackToAllowFrom?: boolean | null;
     };
   },
 ): {
@@ -275,11 +277,16 @@ export function resolveDmGroupAccessWithCommandGate(
 
   const configuredAllowFrom = normalizeStringEntries(params.allowFrom ?? []);
   const configuredGroupAllowFrom = normalizeStringEntries(
-    resolveGroupAllowFromSources({
-      allowFrom: configuredAllowFrom,
-      groupAllowFrom: normalizeStringEntries(params.groupAllowFrom ?? []),
-      fallbackToAllowFrom: params.groupAllowFromFallbackToAllowFrom ?? undefined,
-    }),
+    params.command?.commandGroupAllowFrom != null
+      ? params.command.commandGroupAllowFrom
+      : resolveGroupAllowFromSources({
+          allowFrom: configuredAllowFrom,
+          groupAllowFrom: normalizeStringEntries(params.groupAllowFrom ?? []),
+          fallbackToAllowFrom:
+            params.command?.commandGroupAllowFromFallbackToAllowFrom ??
+            params.groupAllowFromFallbackToAllowFrom ??
+            undefined,
+        }),
   );
   // Group command authorization must not inherit DM pairing-store approvals.
   const commandDmAllowFrom = params.isGroup ? configuredAllowFrom : access.effectiveAllowFrom;

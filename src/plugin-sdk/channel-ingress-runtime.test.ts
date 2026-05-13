@@ -84,7 +84,7 @@ describe("plugin-sdk/channel-ingress-runtime", () => {
         useAccessGroups: true,
         allowTextCommands: true,
         hasControlCommand: true,
-        groupOwnerAllowFrom: "none",
+        groupOwnerAllowFromFallbackToAllowFrom: false,
         commandGroupAllowFromFallbackToAllowFrom: false,
       },
     });
@@ -92,6 +92,86 @@ describe("plugin-sdk/channel-ingress-runtime", () => {
     expect(unauthorizedCommand.senderAccess.decision).toBe("allow");
     expect(unauthorizedCommand.senderAccess.reasonCode).toBe("group_policy_open");
     expect(unauthorizedCommand.commandAccess.shouldBlockControlCommand).toBe(true);
+  });
+
+  it("treats explicit empty commandGroupAllowFrom as no group command senders", async () => {
+    const command = {
+      useAccessGroups: true,
+      allowTextCommands: true,
+      hasControlCommand: true,
+      groupOwnerAllowFromFallbackToAllowFrom: false,
+    };
+    const fallbackAllowed = await resolve({
+      conversation: { kind: "group", id: "room-1" },
+      event: { kind: "message", authMode: "inbound", mayPair: false },
+      policy: {
+        dmPolicy: "allowlist",
+        groupPolicy: "open",
+        groupAllowFromFallbackToAllowFrom: false,
+      },
+      allowFrom: ["owner"],
+      command: {
+        ...command,
+        commandGroupAllowFromFallbackToAllowFrom: true,
+      },
+    });
+    expect(fallbackAllowed.commandAccess.authorized).toBe(true);
+
+    const explicitEmptyBlocked = await resolve({
+      conversation: { kind: "group", id: "room-1" },
+      event: { kind: "message", authMode: "inbound", mayPair: false },
+      policy: {
+        dmPolicy: "allowlist",
+        groupPolicy: "open",
+        groupAllowFromFallbackToAllowFrom: false,
+      },
+      allowFrom: ["owner"],
+      command: {
+        ...command,
+        commandGroupAllowFrom: [],
+        commandGroupAllowFromFallbackToAllowFrom: true,
+      },
+    });
+    expect(explicitEmptyBlocked.commandAccess.authorized).toBe(false);
+    expect(explicitEmptyBlocked.commandAccess.shouldBlockControlCommand).toBe(true);
+  });
+
+  it("accepts legacy groupOwnerAllowFrom sentinels", async () => {
+    const groupMessage = {
+      conversation: { kind: "group", id: "room-1" } as const,
+      event: { kind: "message", authMode: "inbound", mayPair: false } as const,
+      policy: {
+        dmPolicy: "allowlist",
+        groupPolicy: "open",
+        groupAllowFromFallbackToAllowFrom: false,
+      } as const,
+      allowFrom: ["owner"],
+    };
+    const command = {
+      useAccessGroups: true,
+      allowTextCommands: true,
+      hasControlCommand: true,
+      commandGroupAllowFromFallbackToAllowFrom: false,
+    };
+
+    const configured = await resolve({
+      ...groupMessage,
+      command: {
+        ...command,
+        groupOwnerAllowFrom: "configured",
+      },
+    });
+    expect(configured.commandAccess.authorized).toBe(true);
+
+    const none = await resolve({
+      ...groupMessage,
+      command: {
+        ...command,
+        groupOwnerAllowFrom: "none",
+      },
+    });
+    expect(none.commandAccess.authorized).toBe(false);
+    expect(none.commandAccess.shouldBlockControlCommand).toBe(true);
   });
 
   it("keeps normalized compatibility entries scoped to the intended identifier kind", async () => {

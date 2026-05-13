@@ -106,10 +106,17 @@ export type ChannelMessageIngressCommandInput = NonNullable<
 > & {
   /** Explicit command-owner allowlist; defaults to effective DM allowlist. */
   commandOwnerAllowFrom?: Array<string | number> | null;
+  /**
+   * Explicit group command-owner allowlist; defaults to configured DM allowlist in groups.
+   * Legacy SDK callers may still pass "configured" or "none".
+   */
+  groupOwnerAllowFrom?: Array<string | number> | "configured" | "none" | null;
   /** Controls whether group command owners inherit configured DM owners. */
-  groupOwnerAllowFrom?: "configured" | "none";
+  groupOwnerAllowFromFallbackToAllowFrom?: boolean;
   /** Allows direct-message command checks to reuse effective group allowlists. */
   directGroupAllowFrom?: "effective" | "none";
+  /** Explicit group command allowlist; defaults to group sender allowlist/fallback. */
+  commandGroupAllowFrom?: Array<string | number> | null;
   /** Group command allowFrom fallback, separate from normal group sender policy. */
   commandGroupAllowFromFallbackToAllowFrom?: boolean;
 };
