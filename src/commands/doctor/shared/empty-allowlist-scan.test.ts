@@ -5,6 +5,7 @@ vi.mock("../channel-capabilities.js", () => ({
   getDoctorChannelCapabilities: (channelName?: string) => ({
     dmAllowFromMode: "topOnly",
     groupModel: "sender",
+    supportsGroupChats: true,
     groupAllowFromFallbackToAllowFrom: channelName !== "imessage",
     warnOnEmptyGroupSenderAllowlist: channelName !== "discord",
   }),

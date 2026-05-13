@@ -9,6 +9,7 @@ vi.mock("../channel-capabilities.js", () => ({
     dmAllowFromMode:
       channelName === "googlechat" || channelName === "matrix" ? "nestedOnly" : "topOrNested",
     groupModel: "sender",
+    supportsGroupChats: true,
     groupAllowFromFallbackToAllowFrom: true,
     warnOnEmptyGroupSenderAllowlist: true,
   }),

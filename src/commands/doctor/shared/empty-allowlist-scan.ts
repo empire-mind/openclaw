@@ -1,5 +1,6 @@
 import type { ChannelDoctorEmptyAllowlistAccountContext } from "../../../channels/plugins/types.adapters.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
+import type { DoctorChannelCapabilities } from "../channel-capabilities.js";
 import type { DoctorAccountRecord, DoctorAllowFromList } from "../types.js";
 import { collectEmptyAllowlistPolicyWarningsForAccount } from "./empty-allowlist-policy.js";
 import { asObjectRecord } from "./object.js";
@@ -10,6 +11,7 @@ type ScanEmptyAllowlistPolicyWarningsParams = {
   shouldSkipDefaultEmptyGroupAllowlistWarning?: (
     params: ChannelDoctorEmptyAllowlistAccountContext,
   ) => boolean;
+  resolveCapabilities?: (channelName: string) => DoctorChannelCapabilities;
 };
 
 function isDisabledRecord(value: unknown): boolean {
@@ -59,6 +61,7 @@ export function scanEmptyAllowlistPolicyWarnings(
         doctorFixCommand: params.doctorFixCommand,
         parent,
         prefix,
+        capabilities: params.resolveCapabilities?.(channelName),
         shouldSkipDefaultEmptyGroupAllowlistWarning:
           params.shouldSkipDefaultEmptyGroupAllowlistWarning,
       }),

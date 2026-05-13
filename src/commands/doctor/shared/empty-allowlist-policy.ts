@@ -1,5 +1,8 @@
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
-import { getDoctorChannelCapabilities } from "../channel-capabilities.js";
+import {
+  getDoctorChannelCapabilities,
+  type DoctorChannelCapabilities,
+} from "../channel-capabilities.js";
 import type { DoctorAccountRecord, DoctorAllowFromList } from "../types.js";
 import { hasAllowFromEntries } from "./allowlist.js";
 import { shouldSkipChannelDoctorDefaultEmptyGroupAllowlistWarning } from "./channel-doctor.js";
@@ -11,15 +14,12 @@ type CollectEmptyAllowlistPolicyWarningsParams = {
   doctorFixCommand: string;
   parent?: DoctorAccountRecord;
   prefix: string;
+  capabilities?: DoctorChannelCapabilities;
   shouldSkipDefaultEmptyGroupAllowlistWarning?: typeof shouldSkipChannelDoctorDefaultEmptyGroupAllowlistWarning;
 };
 
-function usesSenderBasedGroupAllowlist(channelName?: string): boolean {
-  return getDoctorChannelCapabilities(channelName).warnOnEmptyGroupSenderAllowlist;
-}
-
-function allowsGroupAllowFromFallback(channelName?: string): boolean {
-  return getDoctorChannelCapabilities(channelName).groupAllowFromFallbackToAllowFrom;
+function resolveCapabilities(params: CollectEmptyAllowlistPolicyWarningsParams) {
+  return params.capabilities ?? getDoctorChannelCapabilities(params.channelName);
 }
 
 export function collectEmptyAllowlistPolicyWarningsForAccount(
@@ -60,8 +60,21 @@ export function collectEmptyAllowlistPolicyWarningsForAccount(
     (params.account.groupPolicy as string | undefined) ??
     (params.parent?.groupPolicy as string | undefined) ??
     undefined;
+  const capabilities = resolveCapabilities(params);
 
-  if (groupPolicy !== "allowlist" || !usesSenderBasedGroupAllowlist(params.channelName)) {
+  collectCommandFallbackRelianceWarnings({
+    account: params.account,
+    capabilities,
+    cfg: params.cfg,
+    effectiveAllowFrom,
+    channelName: params.channelName,
+    groupPolicy,
+    parent: params.parent,
+    prefix: params.prefix,
+    warnings,
+  });
+
+  if (groupPolicy !== "allowlist" || !capabilities.warnOnEmptyGroupSenderAllowlist) {
     return warnings;
   }
 
@@ -89,9 +102,15 @@ export function collectEmptyAllowlistPolicyWarningsForAccount(
   // Match runtime semantics: resolveGroupAllowFromSources treats empty arrays as
   // unset and falls back to allowFrom.
   const groupAllowFrom = hasAllowFromEntries(rawGroupAllowFrom) ? rawGroupAllowFrom : undefined;
-  const fallbackToAllowFrom = allowsGroupAllowFromFallback(params.channelName);
+  const fallbackToAllowFrom = capabilities.groupAllowFromFallbackToAllowFrom;
   const effectiveGroupAllowFrom =
     groupAllowFrom ?? (fallbackToAllowFrom ? effectiveAllowFrom : undefined);
+
+  if (fallbackToAllowFrom && !groupAllowFrom && hasAllowFromEntries(effectiveAllowFrom)) {
+    warnings.push(
+      `- ${params.prefix}.groupPolicy is "allowlist" and ${params.prefix}.groupAllowFrom is unset, so allowFrom is currently used as the group sender allowlist fallback. This behavior will be removed in future releases; set ${params.prefix}.groupAllowFrom explicitly.`,
+    );
+  }
 
   if (hasAllowFromEntries(effectiveGroupAllowFrom)) {
     return warnings;
@@ -108,4 +127,126 @@ export function collectEmptyAllowlistPolicyWarningsForAccount(
   }
 
   return warnings;
+}
+
+function collectCommandFallbackRelianceWarnings(params: {
+  account: DoctorAccountRecord;
+  capabilities: DoctorChannelCapabilities;
+  cfg?: OpenClawConfig;
+  effectiveAllowFrom?: DoctorAllowFromList;
+  channelName?: string;
+  groupPolicy?: string;
+  parent?: DoctorAccountRecord;
+  prefix: string;
+  warnings: string[];
+}): void {
+  if (!hasAllowFromEntries(params.effectiveAllowFrom)) {
+    return;
+  }
+  const commandGroupFallback = params.capabilities.legacyDmCommandGroupAllowFromMigrationTarget
+    ? (params.capabilities.commandGroupAllowFromFallbackToAllowFrom ??
+      params.capabilities.groupAllowFromFallbackToAllowFrom)
+    : false;
+  const commandGroupCoveredByGroupAllowFrom = hasAllowFromEntries(
+    readAllowFromTarget(params.account, params.parent, "groupAllowFrom"),
+  );
+  const shouldWarnForGroupCommands =
+    params.groupPolicy !== "disabled" &&
+    (params.capabilities.supportsGroupChats || hasGroupCommandAuthorizationConfig(params));
+  if (
+    shouldWarnForGroupCommands &&
+    commandGroupFallback &&
+    !hasExplicitAllowFromTarget(params.account, params.parent, "commandGroupAllowFrom") &&
+    !commandGroupCoveredByGroupAllowFrom
+  ) {
+    params.warnings.push(
+      `- ${params.prefix} group command authorization currently uses allowFrom as the group command allowlist fallback because commandGroupAllowFrom is unset. This behavior will be removed in future releases; set ${params.prefix}.commandGroupAllowFrom explicitly.`,
+    );
+  }
+  if (
+    shouldWarnForGroupCommands &&
+    params.capabilities.groupOwnerAllowFromFallbackToAllowFrom &&
+    params.capabilities.groupOwnerAllowFromFallbackToAllowFromExplicit === true &&
+    !hasExplicitAllowFromTarget(params.account, params.parent, "groupOwnerAllowFrom")
+  ) {
+    params.warnings.push(
+      `- ${params.prefix} group command-owner authorization currently uses allowFrom as the group command-owner fallback because groupOwnerAllowFrom is unset. This behavior will be removed in future releases; set ${params.prefix}.groupOwnerAllowFrom explicitly.`,
+    );
+  }
+  if (
+    params.cfg &&
+    params.channelName &&
+    params.capabilities.commandAllowFromFallbackToAllowFrom &&
+    !hasExplicitProviderAllowFromTarget(params.cfg?.commands?.allowFrom, params.channelName, {
+      includeGlobal: true,
+    })
+  ) {
+    params.warnings.push(
+      `- ${params.prefix} command authorization currently uses allowFrom as the command allowlist fallback because commands.allowFrom.${params.channelName} is unset. This behavior will be removed in future releases; set commands.allowFrom.${params.channelName} explicitly.`,
+    );
+  }
+  if (
+    params.cfg &&
+    params.channelName &&
+    params.capabilities.elevatedAllowFromFallbackToAllowFrom &&
+    !hasExplicitProviderAllowFromTarget(params.cfg?.tools?.elevated?.allowFrom, params.channelName)
+  ) {
+    params.warnings.push(
+      `- ${params.prefix} elevated authorization currently uses allowFrom as the elevated allowlist fallback because tools.elevated.allowFrom.${params.channelName} is unset. This behavior will be removed in future releases; set tools.elevated.allowFrom.${params.channelName} explicitly.`,
+    );
+  }
+}
+
+function hasGroupCommandAuthorizationConfig(params: {
+  account: DoctorAccountRecord;
+  capabilities: DoctorChannelCapabilities;
+  parent?: DoctorAccountRecord;
+}): boolean {
+  return (
+    params.capabilities.commandGroupAllowFromFallbackToAllowFrom !== undefined ||
+    params.capabilities.legacyDmCommandGroupAllowFromMigrationTarget !== undefined ||
+    params.capabilities.legacyDmGroupOwnerAllowFromMigrationTarget !== undefined ||
+    Array.isArray(params.account.groupAllowFrom) ||
+    Array.isArray(params.parent?.groupAllowFrom) ||
+    Array.isArray(params.account.commandGroupAllowFrom) ||
+    Array.isArray(params.parent?.commandGroupAllowFrom) ||
+    Array.isArray(params.account.groupOwnerAllowFrom) ||
+    Array.isArray(params.parent?.groupOwnerAllowFrom)
+  );
+}
+
+function hasExplicitAllowFromTarget(
+  account: DoctorAccountRecord,
+  parent: DoctorAccountRecord | undefined,
+  key: "commandGroupAllowFrom" | "groupOwnerAllowFrom",
+): boolean {
+  return Array.isArray(account[key]) || Array.isArray(parent?.[key]);
+}
+
+function readAllowFromTarget(
+  account: DoctorAccountRecord,
+  parent: DoctorAccountRecord | undefined,
+  key: "groupAllowFrom",
+): DoctorAllowFromList | undefined {
+  const own = account[key];
+  if (Array.isArray(own)) {
+    return own as DoctorAllowFromList;
+  }
+  const inherited = parent?.[key];
+  return Array.isArray(inherited) ? (inherited as DoctorAllowFromList) : undefined;
+}
+
+function hasExplicitProviderAllowFromTarget(
+  allowFromByProvider: unknown,
+  channelName: string | undefined,
+  options: { includeGlobal?: boolean } = {},
+): boolean {
+  if (!channelName || !allowFromByProvider || typeof allowFromByProvider !== "object") {
+    return false;
+  }
+  const allowFromRecord = allowFromByProvider as Record<string, unknown>;
+  return (
+    Object.hasOwn(allowFromRecord, channelName) ||
+    (options.includeGlobal === true && Object.hasOwn(allowFromRecord, "*"))
+  );
 }

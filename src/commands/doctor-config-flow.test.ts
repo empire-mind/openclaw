@@ -642,24 +642,28 @@ vi.mock("./doctor/channel-capabilities.js", () => {
     googlechat: {
       dmAllowFromMode: "nestedOnly",
       groupModel: "route",
+      supportsGroupChats: true,
       groupAllowFromFallbackToAllowFrom: false,
       warnOnEmptyGroupSenderAllowlist: false,
     },
     matrix: {
       dmAllowFromMode: "nestedOnly",
       groupModel: "sender",
+      supportsGroupChats: true,
       groupAllowFromFallbackToAllowFrom: false,
       warnOnEmptyGroupSenderAllowlist: true,
     },
     msteams: {
       dmAllowFromMode: "topOnly",
       groupModel: "hybrid",
+      supportsGroupChats: true,
       groupAllowFromFallbackToAllowFrom: false,
       warnOnEmptyGroupSenderAllowlist: true,
     },
     zalouser: {
       dmAllowFromMode: "topOnly",
       groupModel: "hybrid",
+      supportsGroupChats: true,
       groupAllowFromFallbackToAllowFrom: false,
       warnOnEmptyGroupSenderAllowlist: false,
     },
@@ -667,6 +671,7 @@ vi.mock("./doctor/channel-capabilities.js", () => {
   const fallback = {
     dmAllowFromMode: "topOnly",
     groupModel: "sender",
+    supportsGroupChats: true,
     groupAllowFromFallbackToAllowFrom: true,
     warnOnEmptyGroupSenderAllowlist: true,
   };
@@ -1052,6 +1057,17 @@ vi.mock("./doctor/shared/channel-doctor.js", () => {
       shouldSkipDefaultEmptyGroupAllowlistWarning: ({ channelName }: { channelName: string }) =>
         channelName === "googlechat" || channelName === "telegram",
     })),
+    resolveDoctorChannelCapabilities: vi.fn(() => ({
+      dmAllowFromMode: "topOnly",
+      groupModel: "sender",
+      supportsGroupChats: true,
+      groupAllowFromFallbackToAllowFrom: true,
+      groupOwnerAllowFromFallbackToAllowFrom: true,
+      commandAllowFromFallbackToAllowFrom: true,
+      elevatedAllowFromFallbackToAllowFrom: false,
+      warnOnEmptyGroupSenderAllowlist: true,
+    })),
+    resolveDoctorChannelCapabilityMetadata: vi.fn(() => undefined),
     runChannelDoctorConfigSequences: vi.fn(async () => ({ changeNotes: [], warningNotes: [] })),
     shouldSkipChannelDoctorDefaultEmptyGroupAllowlistWarning: vi.fn(
       ({ channelName }: { channelName: string }) =>

@@ -26,7 +26,11 @@ vi.mock("../channel-capabilities.js", () => {
   const fallback = {
     dmAllowFromMode: "topOnly",
     groupModel: "sender",
+    supportsGroupChats: true,
     groupAllowFromFallbackToAllowFrom: true,
+    groupOwnerAllowFromFallbackToAllowFrom: true,
+    commandAllowFromFallbackToAllowFrom: true,
+    elevatedAllowFromFallbackToAllowFrom: true,
     warnOnEmptyGroupSenderAllowlist: true,
   };
   return {
@@ -57,6 +61,17 @@ vi.mock("./channel-doctor.js", () => ({
   createChannelDoctorEmptyAllowlistPolicyHooks: vi.fn(() => ({
     extraWarningsForAccount: () => [],
     shouldSkipDefaultEmptyGroupAllowlistWarning: () => false,
+  })),
+  resolveDoctorChannelCapabilities: vi.fn((_: unknown, channelName?: string) => ({
+    dmAllowFromMode: "topOnly",
+    groupModel: "sender",
+    supportsGroupChats: true,
+    groupAllowFromFallbackToAllowFrom: true,
+    groupOwnerAllowFromFallbackToAllowFrom: channelName !== "external",
+    commandGroupAllowFromFallbackToAllowFrom: channelName !== "external",
+    commandAllowFromFallbackToAllowFrom: true,
+    elevatedAllowFromFallbackToAllowFrom: true,
+    warnOnEmptyGroupSenderAllowlist: true,
   })),
   shouldSkipChannelDoctorDefaultEmptyGroupAllowlistWarning: vi.fn(() => false),
 }));
@@ -253,6 +268,23 @@ describe("doctor preview warnings", () => {
     );
     expect(warning).not.toContain("\u001B");
     expect(warning).not.toContain("\r");
+  });
+
+  it("uses contextual channel capabilities for preview fallback warnings", async () => {
+    const warnings = await collectDoctorPreviewWarnings({
+      cfg: {
+        channels: {
+          external: {
+            allowFrom: ["user:1"],
+          },
+        },
+      },
+      doctorFixCommand: "openclaw doctor --fix",
+    });
+
+    const text = warnings.join("\n");
+    expect(text).not.toContain("group command authorization currently uses allowFrom");
+    expect(text).not.toContain("group command-owner authorization currently uses allowFrom");
   });
 
   it("includes stale plugin config warnings", async () => {
