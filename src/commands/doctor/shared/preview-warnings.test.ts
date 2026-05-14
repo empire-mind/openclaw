@@ -561,6 +561,18 @@ describe("doctor preview warnings", () => {
     expect(
       collectVisibleReplyToolPolicyWarnings({
         channels: {
+          defaults: {
+            groupPolicy: "allowlist",
+          },
+        },
+        tools: {
+          allow: ["read"],
+        },
+      }),
+    ).toEqual([]);
+    expect(
+      collectVisibleReplyToolPolicyWarnings({
+        channels: {
           slack: {},
         },
         messages: {
