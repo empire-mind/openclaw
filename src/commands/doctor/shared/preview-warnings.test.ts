@@ -530,6 +530,26 @@ describe("doctor preview warnings", () => {
     expect(warnings[0]).not.toContain("message tool is unavailable");
   });
 
+  it("includes the default private group reply advisory in doctor preview output", async () => {
+    const warnings = await collectDoctorPreviewWarnings({
+      cfg: {
+        channels: {
+          slack: {},
+        },
+        tools: {
+          profile: "messaging",
+        },
+      },
+      doctorFixCommand: "openclaw doctor --fix",
+    });
+
+    expect(warnings).toContainEqual(
+      expect.stringContaining('messages.groupChat.visibleReplies defaults to "message_tool"'),
+    );
+    expect(warnings.join("\n")).toContain('messages.groupChat.visibleReplies to "automatic"');
+    expect(warnings.join("\n")).not.toContain("message tool is unavailable");
+  });
+
   it("skips visible reply tool warnings when default groups are unused or groups are automatic", () => {
     expect(
       collectVisibleReplyToolPolicyWarnings({
