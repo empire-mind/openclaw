@@ -162,18 +162,19 @@ function formatTargets(targets: string[]): string {
 export function collectVisibleReplyToolPolicyWarnings(cfg: OpenClawConfig): string[] {
   const groupPolicy = resolveGroupVisibleReplyProvenance(cfg);
   const hasConfiguredChannelChat = collectChannelRouteTargets(cfg).length > 0;
+  const targets = collectMessageToolUnavailableTargets(cfg);
   const warnings: string[] = [];
   if (
     groupPolicy.value === "message_tool" &&
     groupPolicy.provenance === "default" &&
-    hasConfiguredChannelChat
+    hasConfiguredChannelChat &&
+    targets.length === 0
   ) {
     warnings.push(
       `- messages.groupChat.visibleReplies defaults to "message_tool" for configured group/channel chats; normal final replies stay private unless the agent uses the message tool. Set messages.groupChat.visibleReplies to "automatic" to restore legacy automatic room replies.`,
     );
   }
 
-  const targets = collectMessageToolUnavailableTargets(cfg);
   if (targets.length === 0) {
     return warnings;
   }

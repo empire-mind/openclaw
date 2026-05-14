@@ -445,14 +445,10 @@ describe("doctor preview warnings", () => {
       },
     });
 
-    expect(warnings).toEqual([
-      expect.stringContaining('messages.groupChat.visibleReplies defaults to "message_tool"'),
-      expect.stringContaining("message tool is unavailable"),
-    ]);
-    expect(warnings[0]).toContain("normal final replies stay private");
-    expect(warnings[0]).toContain('messages.groupChat.visibleReplies to "automatic"');
-    expect(warnings[1]).toContain("message tool is unavailable");
-    expect(warnings[1]).toContain("falls back to automatic group/channel replies");
+    expect(warnings).toEqual([expect.stringContaining("message tool is unavailable")]);
+    expect(warnings[0]).toContain('messages.groupChat.visibleReplies defaults to "message_tool"');
+    expect(warnings[0]).toContain("falls back to automatic group/channel replies");
+    expect(warnings[0]).not.toContain("normal final replies stay private");
   });
 
   it("warns strongly when explicit group visible replies require an unavailable message tool", () => {
