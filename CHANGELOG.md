@@ -11,7 +11,6 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
-- Control UI/chat: reconcile terminal and reconnect run cleanup with cached session activity, stale compaction/fallback indicators, and a compact composer run-status chip so completed or interrupted turns do not leave Stop active. Fixes #76874 and #64220; refs #71630. Thanks @BunsDev.
 - iOS/chat: resize PhotosPicker image attachments to capped JPEGs before staging and sending, stripping source metadata and keeping oversized camera photos under the chat upload budget. Fixes #68524. Thanks @BunsDev.
 - Doctor/messages: warn when configured group/channel chats still use the default private `message_tool` visible-reply policy even when the message tool is available, so operators see why normal final replies stay private unless the agent calls `message(action=send)`.
 - Codex harness: classify native app-server token-refresh logout and relogin failures as authentication refresh errors, so users get re-authentication guidance instead of a raw runtime failure.
