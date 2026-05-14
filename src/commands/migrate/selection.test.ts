@@ -491,7 +491,7 @@ describe("applyMigrationPluginSelection", () => {
       "plugin:gmail",
     ]);
     expect(formatMigrationPluginSelectionHint(items[1])).toBe(
-      "openai-curated; conflict: plugin exists",
+      "openai-curated plugin already installed in workspace",
     );
   });
 
