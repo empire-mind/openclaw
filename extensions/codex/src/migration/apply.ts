@@ -39,6 +39,7 @@ import {
 import { buildCodexPluginAppCacheKey } from "../app-server/plugin-app-cache-key.js";
 import type { v2 } from "../app-server/protocol.js";
 import { requestCodexAppServerJson } from "../app-server/request.js";
+import { clearSharedCodexAppServerClientAndWait } from "../app-server/shared-client.js";
 import { buildCodexMigrationPlan } from "./plan.js";
 import {
   buildCodexPluginsConfigValue,
@@ -52,6 +53,7 @@ import { resolveCodexMigrationTargets } from "./targets.js";
 
 const CODEX_PLUGIN_AUTH_REQUIRED_REASON = "auth_required";
 const CODEX_PLUGIN_NOT_SELECTED_REASON = "not selected for migration";
+const TARGET_CODEX_MARKETPLACE_DISCOVERY_POLL_MS = 250;
 
 class CodexPluginConfigConflictError extends Error {
   constructor(readonly reason: string) {
@@ -65,40 +67,49 @@ export async function applyCodexMigrationPlan(params: {
   plan?: MigrationPlan;
   runtime?: MigrationProviderContext["runtime"];
 }): Promise<MigrationApplyResult> {
-  const plan = params.plan ?? (await buildCodexMigrationPlan(params.ctx));
-  const reportDir = params.ctx.reportDir ?? path.join(params.ctx.stateDir, "migration", "codex");
-  const items: MigrationItem[] = [];
-  const runtime = withCachedMigrationConfigRuntime(
-    params.ctx.runtime ?? params.runtime,
-    params.ctx.config,
-  );
-  const applyCtx = { ...params.ctx, runtime };
-  for (const item of plan.items) {
-    if (item.status !== "planned") {
-      items.push(item);
-      continue;
+  try {
+    const plan = params.plan ?? (await buildCodexMigrationPlan(params.ctx));
+    const reportDir = params.ctx.reportDir ?? path.join(params.ctx.stateDir, "migration", "codex");
+    const items: MigrationItem[] = [];
+    const runtime = withCachedMigrationConfigRuntime(
+      params.ctx.runtime ?? params.runtime,
+      params.ctx.config,
+    );
+    const applyCtx = { ...params.ctx, runtime };
+    for (const item of plan.items) {
+      if (item.status !== "planned") {
+        items.push(item);
+        continue;
+      }
+      if (item.id === CODEX_PLUGIN_CONFIG_ITEM_ID) {
+        items.push(await applyCodexPluginConfigItem(applyCtx, item, items));
+      } else if (item.kind === "plugin" && item.action === "install") {
+        items.push(await applyCodexPluginInstallItem(applyCtx, item));
+      } else if (item.kind === "manual") {
+        items.push(applyMigrationManualItem(item));
+      } else if (item.action === "archive") {
+        items.push(await archiveMigrationItem(item, reportDir));
+      } else {
+        items.push(
+          await copyMigrationFileItem(item, reportDir, { overwrite: params.ctx.overwrite }),
+        );
+      }
     }
-    if (item.id === CODEX_PLUGIN_CONFIG_ITEM_ID) {
-      items.push(await applyCodexPluginConfigItem(applyCtx, item, items));
-    } else if (item.kind === "plugin" && item.action === "install") {
-      items.push(await applyCodexPluginInstallItem(applyCtx, item));
-    } else if (item.kind === "manual") {
-      items.push(applyMigrationManualItem(item));
-    } else if (item.action === "archive") {
-      items.push(await archiveMigrationItem(item, reportDir));
-    } else {
-      items.push(await copyMigrationFileItem(item, reportDir, { overwrite: params.ctx.overwrite }));
-    }
+    const result: MigrationApplyResult = {
+      ...plan,
+      items,
+      summary: summarizeMigrationItems(items),
+      backupPath: params.ctx.backupPath,
+      reportDir,
+    };
+    await writeMigrationReport(result, { title: "Codex Migration Report" });
+    return result;
+  } finally {
+    await clearSharedCodexAppServerClientAndWait({
+      exitTimeoutMs: 2_000,
+      forceKillDelayMs: 250,
+    });
   }
-  const result: MigrationApplyResult = {
-    ...plan,
-    items,
-    summary: summarizeMigrationItems(items),
-    backupPath: params.ctx.backupPath,
-    reportDir,
-  };
-  await writeMigrationReport(result, { title: "Codex Migration Report" });
-  return result;
 }
 
 async function applyCodexPluginInstallItem(
@@ -115,18 +126,18 @@ async function applyCodexPluginInstallItem(
   try {
     const appCacheKey = await buildTargetCodexPluginAppCacheKey(ctx);
     const appServer = resolveTargetCodexAppServer(ctx);
+    const targets = resolveCodexMigrationTargets(ctx);
     const result = await ensureCodexPluginActivation({
       identity: policy,
       installEvenIfActive: true,
       request: async (method, requestParams) =>
-        await requestCodexAppServerJson({
+        await requestTargetCodexAppServerJson({
           method,
           requestParams,
           timeoutMs: 60_000,
           startOptions: appServer.start,
-          agentDir: resolveCodexMigrationTargets(ctx).agentDir,
+          agentDir: targets.agentDir,
           config: ctx.config,
-          isolated: true,
         }),
       appCache: defaultCodexAppInventoryCache,
       appCacheKey,
@@ -181,6 +192,58 @@ function resolveTargetCodexAppServer(ctx: MigrationProviderContext) {
   return resolveCodexAppServerRuntimeOptions({
     pluginConfig: readCodexPluginConfig(ctx.config),
   });
+}
+
+async function requestTargetCodexAppServerJson(params: {
+  method: string;
+  requestParams?: unknown;
+  timeoutMs: number;
+  startOptions: ReturnType<typeof resolveTargetCodexAppServer>["start"];
+  agentDir: string;
+  config: MigrationProviderContext["config"];
+}): Promise<unknown> {
+  if (params.method !== "plugin/list") {
+    return await requestCodexAppServerJson(params);
+  }
+
+  const deadline = Date.now() + params.timeoutMs;
+  let lastResponse: unknown;
+  do {
+    const remainingMs = Math.max(1, deadline - Date.now());
+    lastResponse = await requestCodexAppServerJson({
+      ...params,
+      timeoutMs: remainingMs,
+    });
+    if (hasOpenAiCuratedMarketplace(lastResponse)) {
+      return lastResponse;
+    }
+    if (Date.now() >= deadline) {
+      return lastResponse;
+    }
+    await sleep(Math.min(TARGET_CODEX_MARKETPLACE_DISCOVERY_POLL_MS, deadline - Date.now()));
+  } while (Date.now() < deadline);
+
+  return lastResponse;
+}
+
+function hasOpenAiCuratedMarketplace(response: unknown): boolean {
+  if (!response || typeof response !== "object" || !("marketplaces" in response)) {
+    return false;
+  }
+  const marketplaces = (response as { marketplaces?: unknown }).marketplaces;
+  return (
+    Array.isArray(marketplaces) &&
+    marketplaces.some(
+      (marketplace) =>
+        marketplace &&
+        typeof marketplace === "object" &&
+        (marketplace as { name?: unknown }).name === CODEX_PLUGINS_MARKETPLACE_NAME,
+    )
+  );
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function buildTargetCodexPluginAppCacheKey(ctx: MigrationProviderContext): Promise<string> {
