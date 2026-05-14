@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import {
   applyMigrationManualItem,
@@ -25,6 +26,7 @@ import {
   resolveCodexAppServerAuthAccountCacheKey,
   resolveCodexAppServerAuthProfileIdForAgent,
   resolveCodexAppServerEnvApiKeyCacheKey,
+  resolveCodexAppServerHomeDir,
 } from "../app-server/auth-bridge.js";
 import {
   CODEX_PLUGINS_MARKETPLACE_NAME,
@@ -54,6 +56,14 @@ import { resolveCodexMigrationTargets } from "./targets.js";
 const CODEX_PLUGIN_AUTH_REQUIRED_REASON = "auth_required";
 const CODEX_PLUGIN_NOT_SELECTED_REASON = "not selected for migration";
 const TARGET_CODEX_MARKETPLACE_DISCOVERY_POLL_MS = 250;
+const TARGET_CODEX_MARKETPLACE_MANIFEST_PATH = path.join(
+  ".tmp",
+  "plugins",
+  ".agents",
+  "plugins",
+  "marketplace.json",
+);
+const TARGET_CODEX_MARKETPLACE_SHA_PATH = path.join(".tmp", "plugins.sha");
 
 class CodexPluginConfigConflictError extends Error {
   constructor(readonly reason: string) {
@@ -207,6 +217,7 @@ async function requestTargetCodexAppServerJson(params: {
   }
 
   const deadline = Date.now() + params.timeoutMs;
+  const codexHome = resolveCodexAppServerHomeDir(params.agentDir);
   let lastResponse: unknown;
   do {
     const remainingMs = Math.max(1, deadline - Date.now());
@@ -220,10 +231,52 @@ async function requestTargetCodexAppServerJson(params: {
     if (Date.now() >= deadline) {
       return lastResponse;
     }
+    await waitForTargetCodexMarketplaceSnapshot(codexHome, deadline);
     await sleep(Math.min(TARGET_CODEX_MARKETPLACE_DISCOVERY_POLL_MS, deadline - Date.now()));
   } while (Date.now() < deadline);
 
   return lastResponse;
+}
+
+async function waitForTargetCodexMarketplaceSnapshot(
+  codexHome: string,
+  deadline: number,
+): Promise<boolean> {
+  do {
+    if (await hasTargetCodexMarketplaceSnapshot(codexHome)) {
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await sleep(Math.min(TARGET_CODEX_MARKETPLACE_DISCOVERY_POLL_MS, deadline - Date.now()));
+  } while (Date.now() < deadline);
+  return false;
+}
+
+async function hasTargetCodexMarketplaceSnapshot(codexHome: string): Promise<boolean> {
+  const [manifest, sha] = await Promise.all([
+    fileExists(path.join(codexHome, TARGET_CODEX_MARKETPLACE_MANIFEST_PATH)),
+    fileExists(path.join(codexHome, TARGET_CODEX_MARKETPLACE_SHA_PATH)),
+  ]);
+  return manifest && sha;
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(filePath);
+    return stat.isFile();
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "ENOENT"
+    ) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function hasOpenAiCuratedMarketplace(response: unknown): boolean {

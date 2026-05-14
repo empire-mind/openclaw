@@ -966,6 +966,7 @@ describe("buildCodexMigrationProvider", () => {
     const configState: MigrationProviderContext["config"] = {
       agents: { defaults: { workspace: fixture.workspaceDir } },
     } as MigrationProviderContext["config"];
+    const targetCodexHome = path.join(fixture.stateDir, "agents", "main", "agent", "codex-home");
     let targetPluginListCalls = 0;
     let targetPluginListCallsAtInstall = 0;
     appServerRequest.mockImplementation(
@@ -980,6 +981,18 @@ describe("buildCodexMigrationProvider", () => {
         if (method === "plugin/list" && isTarget) {
           targetPluginListCalls += 1;
           if (targetPluginListCalls === 1) {
+            await writeFile(
+              path.join(
+                targetCodexHome,
+                ".tmp",
+                "plugins",
+                ".agents",
+                "plugins",
+                "marketplace.json",
+              ),
+              JSON.stringify({ name: "openai-curated", plugins: [] }),
+            );
+            await writeFile(path.join(targetCodexHome, ".tmp", "plugins.sha"), "sha\n");
             return {
               marketplaces: [],
               marketplaceLoadErrors: [],
