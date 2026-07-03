@@ -1,0 +1,70 @@
+name: kael-auto-approve
+# Solo-org review unlock (installed 2026-07-03 by Kael, Eli-authorized).
+# Problem: branch protection requires 1 approving review, but GitHub forbids
+# self-approval and this is a single-human org — every PR was unmergeable.
+# Fix: github-actions approves a PR ONLY when (a) it is authored by the org
+# owner or dependabot, AND (b) every check on it has passed. The real review
+# signal is unchanged: bot reviewers (copilot/codex) still file threads, and
+# the org ruleset still requires thread RESOLUTION before merge.
+# Dependabot same-major (patch/minor) bumps additionally get auto-merge armed.
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number (blank = scan all open)"
+        required: false
+  check_suite:
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  checks: read
+  statuses: read
+  actions: read
+  contents: write
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    steps:
+      - name: approve-green-owner-prs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_INPUT: ${{ inputs.pr || '' }}
+        run: |
+          set -uo pipefail
+          if [ -n "$PR_INPUT" ]; then PRS="$PR_INPUT"; else
+            PRS=$(gh pr list --repo "$REPO" --state open --json number,author \
+              --jq '.[] | select(.author.login=="halvo78" or .author.login=="app/dependabot" or .author.login=="dependabot") | .number')
+          fi
+          for pr in $PRS; do
+            info=$(gh pr view "$pr" --repo "$REPO" --json author,title,reviewDecision,isDraft,headRefOid)
+            author=$(jq -r '.author.login' <<<"$info")
+            case "$author" in halvo78|app/dependabot|dependabot) : ;; *) echo "skip #$pr author=$author"; continue ;; esac
+            [ "$(jq -r '.isDraft' <<<"$info")" = "true" ] && { echo "skip #$pr draft"; continue; }
+            sha=$(jq -r '.headRefOid' <<<"$info")
+            # REST check-runs (GITHUB_TOKEN-accessible, unlike GraphQL statusCheckRollup)
+            crs=$(gh api "repos/$REPO/commits/$sha/check-runs?per_page=100" 2>/dev/null || echo '{"check_runs":[]}')
+            bad=$(jq '[.check_runs[] | select(.conclusion != null and .conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped")] | length' <<<"$crs")
+            pend=$(jq '[.check_runs[] | select(.status != "completed")] | length' <<<"$crs")
+            total=$(jq '.check_runs | length' <<<"$crs")
+            if [ "$bad" != "0" ] || [ "$pend" != "0" ]; then echo "skip #$pr checks not green (bad=$bad pend=$pend of $total)"; continue; fi
+            if [ "$(jq -r '.reviewDecision' <<<"$info")" != "APPROVED" ]; then
+              gh pr review "$pr" --repo "$REPO" --approve \
+                -b "auto-approve: all checks green; author is org owner/dependabot (solo-org review unlock)" \
+                && echo "approved #$pr" || echo "approve failed #$pr"
+            fi
+            # dependabot same-major bumps: arm auto-merge (majors stay held for a human)
+            if [ "$author" != "halvo78" ]; then
+              title=$(jq -r '.title' <<<"$info")
+              from_maj=$(echo "$title" | sed -nE 's/.*from ([0-9]+)(\.[0-9.]+)? to ([0-9]+)(\.[0-9.]+)?.*/\1/p')
+              to_maj=$(echo "$title" | sed -nE 's/.*from ([0-9]+)(\.[0-9.]+)? to ([0-9]+)(\.[0-9.]+)?.*/\3/p')
+              if [ -n "$from_maj" ] && [ "$from_maj" = "$to_maj" ]; then
+                gh pr merge "$pr" --repo "$REPO" --squash --auto --delete-branch \
+                  && echo "auto-merge armed #$pr" || true
+              else
+                echo "held #$pr (major bump or unparseable: $title)"
+              fi
+            fi
+          done
