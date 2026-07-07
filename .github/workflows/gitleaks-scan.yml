@@ -1,0 +1,38 @@
+name: gitleaks-scan
+# Produces the `gitleaks-scan` status check required by the org ruleset.
+# NO `uses:` actions — actions/checkout@v4 triggers startup_failure under the org's
+# selected-actions allowlist, so we clone the branch + scan with run-only steps.
+# Clones by REF (not github.sha, which is an ephemeral merge commit on PRs).
+# The gitleaks binary is downloaded fail-fast (curl -f) and checksum-verified.
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  gitleaks-scan:
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: 8.21.2
+    steps:
+      - name: Install gitleaks (checksum-verified)
+        run: |
+          set -euo pipefail
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "${tarball}" "${base}/${tarball}"
+          curl -fsSL -o gitleaks.sums "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep "${tarball}" gitleaks.sums | sha256sum -c -
+          tar -xzf "${tarball}" gitleaks
+          ./gitleaks version
+      - name: Clone and scan for secrets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          git clone --branch "${REF}" --single-branch "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" repo
+          cd repo
+          ../gitleaks git . --redact --no-banner --exit-code 1
+          echo "gitleaks: no leaks found on ${REF}"
